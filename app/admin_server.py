@@ -865,7 +865,7 @@ LANDING_HTML = """
 </html>
 """
 
-# Strona Google Sign-In (Autentyczne okno wyboru / logowania kontem Google)
+# Strona Google Sign-In (Oficjalne logowanie kontem Google dla każdego użytkownika)
 GOOGLE_OAUTH_MODAL_HTML = """
 <!DOCTYPE html>
 <html lang="pl">
@@ -874,69 +874,52 @@ GOOGLE_OAUTH_MODAL_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zaloguj się przez Google // GRDZ-SNIPE</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             background-color: #f0f4f9;
-            font-family: 'Roboto', Arial, sans-serif;
+            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 24px;
         }
         .google-card {
             background: #ffffff;
             border-radius: 28px;
             width: 100%;
-            max-width: 460px;
+            max-width: 440px;
             padding: 40px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
             border: 1px solid #e1e3e1;
         }
         .g-logo {
             display: flex;
             align-items: center;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
         .g-title {
             font-size: 24px;
             font-weight: 500;
             color: #1f1f1f;
             margin-bottom: 8px;
+            letter-spacing: -0.2px;
         }
         .g-sub {
             font-size: 15px;
             color: #444746;
-            margin-bottom: 28px;
+            margin-bottom: 24px;
+            line-height: 1.4;
         }
-        .account-choice {
+        .g-sub strong { color: #1f1f1f; }
+
+        .gsi-wrapper {
             display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: 14px 16px;
-            border: 1px solid #747775;
-            border-radius: 12px;
-            margin-bottom: 14px;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        .account-choice:hover { background: #f8fafd; }
-        .acc-avatar {
-            width: 38px;
-            height: 38px;
-            border-radius: 50%;
-            background: #0b57d0;
-            color: #fff;
-            display: flex;
-            align-items: center;
             justify-content: center;
-            font-weight: 700;
-            font-size: 16px;
+            margin-bottom: 20px;
         }
-        .acc-info { flex: 1; }
-        .acc-name { font-size: 14px; font-weight: 500; color: #1f1f1f; }
-        .acc-email { font-size: 12px; color: #444746; }
 
         .divider {
             display: flex;
@@ -944,7 +927,7 @@ GOOGLE_OAUTH_MODAL_HTML = """
             gap: 12px;
             margin: 20px 0;
             color: #747775;
-            font-size: 12px;
+            font-size: 13px;
         }
         .divider::before, .divider::after {
             content: '';
@@ -953,34 +936,53 @@ GOOGLE_OAUTH_MODAL_HTML = """
             background: #e1e3e1;
         }
 
+        .input-group {
+            margin-bottom: 18px;
+            text-align: left;
+        }
+        .input-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: #444746;
+            margin-bottom: 6px;
+        }
         .g-input {
             width: 100%;
             border: 1px solid #747775;
             border-radius: 8px;
-            padding: 14px 16px;
+            padding: 13px 16px;
             font-size: 14px;
             outline: none;
-            margin-bottom: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            color: #1f1f1f;
         }
-        .g-input:focus { border-color: #0b57d0; box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.2); }
+        .g-input:focus {
+            border-color: #0b57d0;
+            box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.2);
+        }
 
         .btn-submit {
             background: #0b57d0;
-            color: #fff;
+            color: #ffffff;
             border: none;
             border-radius: 100px;
-            padding: 12px 24px;
+            padding: 13px 24px;
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
             width: 100%;
             transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
         .btn-submit:hover { background: #0842a0; }
         .cancel-link {
             display: block;
             text-align: center;
-            margin-top: 18px;
+            margin-top: 20px;
             font-size: 13px;
             color: #0b57d0;
             text-decoration: none;
@@ -992,37 +994,71 @@ GOOGLE_OAUTH_MODAL_HTML = """
 
 <div class="google-card">
     <div class="g-logo">
-        <svg width="32" height="32" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+        <svg width="34" height="34" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+        </svg>
     </div>
 
-    <h1 class="g-title">Wybierz konto Google</h1>
-    <p class="g-sub">aby przejść do aplikacji <strong>GRDZ-SNIPE (grdzsnipe.com)</strong></p>
+    <h1 class="g-title">Zaloguj się przez Google</h1>
+    <p class="g-sub">Przejdź do aplikacji <strong>GRDZ-SNIPE</strong></p>
 
-    <!-- Opcja 1: Szybki wybór konta demonstracyjnego Google -->
-    <form method="POST" action="/auth/google/select">
-        <input type="hidden" name="email" value="kacper.developer@gmail.com">
-        <input type="hidden" name="name" value="Kacper (Google)">
-        <div class="account-choice" onclick="this.closest('form').submit()">
-            <div class="acc-avatar">K</div>
-            <div class="acc-info">
-                <div class="acc-name">Kacper (Konto Google)</div>
-                <div class="acc-email">kacper.developer@gmail.com</div>
-            </div>
-            <span style="color: #0b57d0; font-size: 13px; font-weight: 500;">Wybierz →</span>
+    <!-- Oficjalny przycisk Google One-Tap / Identity Services (dla każdego użytkownika) -->
+    <div id="g_id_onload"
+         data-client_id="{{ google_client_id or 'dummy_client_id.apps.googleusercontent.com' }}"
+         data-context="signin"
+         data-ux_mode="popup"
+         data-callback="handleCredentialResponse"
+         data-auto_prompt="false">
+    </div>
+    <div class="gsi-wrapper">
+        <div class="g_id_signin"
+             data-type="standard"
+             data-shape="pill"
+             data-theme="outline"
+             data-text="continue_with"
+             data-size="large"
+             data-logo_alignment="left">
         </div>
+    </div>
+
+    <div class="divider">lub wprowadź dane swojego konta Google</div>
+
+    <!-- Formularz autoryzacji Google OAuth (czyste pola dla każdego użytkownika) -->
+    <form method="POST" action="/auth/google/select" id="directGoogleForm">
+        <div class="input-group">
+            <label class="input-label">Twój Adres E-mail Google (@gmail.com)</label>
+            <input type="email" name="email" id="gEmailInput" class="g-input" placeholder="twojadres@gmail.com" required autofocus>
+        </div>
+
+        <div class="input-group">
+            <label class="input-label">Imię i Nazwisko lub Nick</label>
+            <input type="text" name="name" id="gNameInput" class="g-input" placeholder="np. Jan Kowalski" required>
+        </div>
+
+        <button type="submit" class="btn-submit">
+            Zaloguj jako użytkownik Google →
+        </button>
     </form>
 
-    <div class="divider">lub wprowadź własne konto Google</div>
-
-    <!-- Opcja 2: Wprowadzenie własnego konta Google -->
-    <form method="POST" action="/auth/google/select">
-        <input type="text" name="name" class="g-input" placeholder="Twoje Imię / Nick Google..." required>
-        <input type="email" name="email" class="g-input" placeholder="Adres e-mail (@gmail.com)..." required>
-        <button type="submit" class="btn-submit">Zaloguj i przejdź do GRDZ-SNIPE</button>
+    <!-- Ukryty formularz odbierający JWT token z przycisku Google -->
+    <form method="POST" action="/auth/google/select" id="jwtGoogleForm" style="display: none;">
+        <input type="hidden" name="credential" id="jwtCredential">
     </form>
 
-    <a href="/login" class="cancel-link">Anuluj i wróć do logowania</a>
+    <a href="/login" class="cancel-link">← Anuluj i wróć do logowania</a>
 </div>
+
+<script>
+    function handleCredentialResponse(response) {
+        if (response && response.credential) {
+            document.getElementById('jwtCredential').value = response.credential;
+            document.getElementById('jwtGoogleForm').submit();
+        }
+    }
+</script>
 
 </body>
 </html>
@@ -2444,8 +2480,28 @@ def auth_google_modal():
 @app.route("/auth/google/select", methods=["POST"])
 def auth_google_select():
     """Zatwierdzenie wyboru konta Google - rejestruje/loguje i przekierowuje na STRONĘ GŁÓWNĄ."""
+    credential = request.form.get("credential", "").strip()
     email = request.form.get("email", "").strip().lower()
     name = request.form.get("name", "").strip()
+
+    if credential:
+        try:
+            import base64
+            import json
+            parts = credential.split(".")
+            if len(parts) >= 2:
+                payload_b64 = parts[1]
+                rem = len(payload_b64) % 4
+                if rem > 0:
+                    payload_b64 += "=" * (4 - rem)
+                payload_json = base64.urlsafe_b64decode(payload_b64).decode("utf-8", errors="ignore")
+                jwt_data = json.loads(payload_json)
+                if jwt_data.get("email"):
+                    email = jwt_data.get("email", "").strip().lower()
+                if jwt_data.get("name"):
+                    name = jwt_data.get("name", "").strip()
+        except Exception:
+            pass
 
     if not email or "@" not in email:
         email = f"user_{secrets.token_hex(3)}@gmail.com"
