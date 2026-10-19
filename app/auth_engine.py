@@ -69,9 +69,31 @@ class AuthEngine:
         self.last_heartbeat = 0
         self.heartbeat_running = False
         self._heartbeat_thread: Optional[threading.Thread] = None
-        self.on_revoked_callback: Optional[Callable[[str], None]] = None
-        self.on_broadcast_callback: Optional[Callable[[str], None]] = None
+        self._on_revoked_cb: Optional[Callable[[str], None]] = None
+        self._on_broadcast_cb: Optional[Callable[[str], None]] = None
+        self.last_revoked_reason: Optional[str] = None
         self.current_action: str = "Bezczynny"
+
+    @property
+    def on_revoked_callback(self):
+        return self._on_revoked_cb
+
+    @on_revoked_callback.setter
+    def on_revoked_callback(self, cb: Optional[Callable[[str], None]]):
+        self._on_revoked_cb = cb
+        if cb and not self.is_authenticated and self.last_revoked_reason:
+            try:
+                cb(self.last_revoked_reason)
+            except Exception:
+                pass
+
+    @property
+    def on_broadcast_callback(self):
+        return self._on_broadcast_cb
+
+    @on_broadcast_callback.setter
+    def on_broadcast_callback(self, cb: Optional[Callable[[str], None]]):
+        self._on_broadcast_cb = cb
 
     @classmethod
     def get_instance(cls, cfg: Optional[Dict[str, Any]] = None) -> "AuthEngine":
@@ -331,11 +353,12 @@ class AuthEngine:
         if self.heartbeat_running:
             return
         self.heartbeat_running = True
+        self.last_revoked_reason = None
 
         def _heartbeat_worker():
             server_url = getattr(self, "_active_server_url", self.auth_server_url)
             while self.heartbeat_running:
-                time.sleep(5)
+                time.sleep(3)
                 if not self.heartbeat_running:
                     break
                 try:
@@ -352,21 +375,33 @@ class AuthEngine:
                         headers={"Content-Type": "application/json"},
                         timeout=5
                     )
-                    if resp.status_code == 200:
+                    data = {}
+                    try:
                         data = resp.json()
-                        status = data.get("status", "active")
-                        success = data.get("success", True)
-                        if status in ("banned", "paused", "expired", "hwid_mismatch", "killswitch", "killed", "revoked") or not success:
-                            self.is_authenticated = False
-                            reason = data.get("message") or f"Licencja została zablokowana przez administratora (status: {status})."
-                            if self.on_revoked_callback:
-                                self.on_revoked_callback(reason)
-                            break
+                    except Exception:
+                        pass
 
-                        # Sprawdzenie powiadomienia broadcast od administratora
-                        b_msg = data.get("broadcast_message") or data.get("broadcast")
-                        if b_msg and self.on_broadcast_callback:
-                            self.on_broadcast_callback(b_msg)
+                    status = data.get("status", "active")
+                    success = data.get("success", True)
+                    is_banned = (
+                        resp.status_code in (401, 403) or
+                        not success or
+                        status in ("banned", "paused", "expired", "hwid_mismatch", "killswitch", "killed", "revoked", "invalid")
+                    )
+
+                    if is_banned:
+                        self.is_authenticated = False
+                        self.heartbeat_running = False
+                        reason = data.get("message") or f"Licencja została zablokowana przez administratora (status: {status})."
+                        self.last_revoked_reason = reason
+                        if self._on_revoked_cb:
+                            self._on_revoked_cb(reason)
+                        break
+
+                    # Sprawdzenie powiadomienia broadcast od administratora
+                    b_msg = data.get("broadcast_message") or data.get("broadcast")
+                    if b_msg and self._on_broadcast_cb:
+                        self._on_broadcast_cb(b_msg)
                 except Exception:
                     pass
 
@@ -379,6 +414,7 @@ class AuthEngine:
 
     def stop_heartbeat(self):
         self.heartbeat_running = False
+        self.is_authenticated = False
 
 
 def get_auth_engine(cfg: Optional[Dict[str, Any]] = None) -> AuthEngine:

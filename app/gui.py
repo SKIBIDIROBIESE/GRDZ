@@ -463,6 +463,60 @@ class CyberModal:
         CyberModal.show_info(parent, title, message, icon_symbol="❌")
 
     @staticmethod
+    def alert(parent, title: str, message: str, accent_color: str = "#ef4444", icon_symbol: str = "⛔"):
+        modal = CyberModal._create_base(parent, title, width=480, height=230)
+        card = ctk.CTkFrame(modal, fg_color="#120c24", corner_radius=14, border_width=1, border_color=accent_color)
+        card.pack(fill="both", expand=True, padx=12, pady=12)
+
+        top_row = ctk.CTkFrame(card, fg_color="transparent")
+        top_row.pack(fill="x", padx=18, pady=(16, 6))
+
+        ctk.CTkLabel(top_row, text=icon_symbol, font=ctk.CTkFont(size=22)).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(
+            top_row, 
+            text=title, 
+            font=ctk.CTkFont(size=15, weight="bold"), 
+            text_color=accent_color
+        ).pack(side="left")
+
+        msg_lbl = ctk.CTkLabel(
+            card,
+            text=message,
+            font=ctk.CTkFont(size=12),
+            text_color="#ede9fe",
+            wraplength=420,
+            justify="center"
+        )
+        msg_lbl.pack(fill="both", expand=True, padx=18, pady=(4, 12))
+
+        def close_win(event=None):
+            try:
+                modal.grab_release()
+                modal.destroy()
+            except Exception:
+                pass
+
+        btn_ok = ctk.CTkButton(
+            card,
+            text="Rozumiem",
+            width=130,
+            height=32,
+            fg_color=accent_color,
+            hover_color="#991b1b" if accent_color == "#ef4444" else "#ea580c",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            corner_radius=8,
+            command=close_win
+        )
+        btn_ok.pack(pady=(0, 12))
+        btn_ok.focus_set()
+        modal.bind("<Return>", close_win)
+        modal.bind("<Escape>", close_win)
+        try:
+            parent.wait_window(modal)
+        except Exception:
+            pass
+
+    @staticmethod
     def show_confirm(parent, title: str, message: str, confirm_text: str = "Tak, usuń", cancel_text: str = "Anuluj") -> bool:
         modal = CyberModal._create_base(parent, title, width=460, height=220)
         result = {"confirmed": False}
@@ -562,11 +616,13 @@ class CyberLicenseModal:
         except Exception:
             pass
         if not self.success:
+            if hasattr(self.parent, "relogin_required"):
+                self.parent.relogin_required = True
+                self.parent.relogin_reason = "Wymagana autoryzacja kluczem licencyjnym."
             try:
                 self.parent.destroy()
             except Exception:
                 pass
-            sys.exit(0)
 
     def _on_close(self):
         try:
@@ -4670,7 +4726,10 @@ class DealTrackerApp(ctk.CTk):
             if res.success:
                 self.after(0, lambda: self._on_license_active(key, res.message))
             else:
-                self.after(0, lambda: self._prompt_license_modal(error_msg=res.message))
+                if res.status in ("banned", "paused", "expired", "hwid_mismatch", "killswitch") or "BAN" in (res.message or "").upper():
+                    self.after(0, lambda: self._on_license_revoked(res.message))
+                else:
+                    self.after(0, lambda: self._prompt_license_modal(error_msg=res.message))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -4696,34 +4755,75 @@ class DealTrackerApp(ctk.CTk):
 
     def _on_license_revoked(self, reason: str):
         def _ui():
-            if self.engine.is_running:
-                self.engine.stop()
-                self.btn_toggle.configure(
-                    text="▶ ROZPOCZNIJ SNIPOWANIE",
-                    fg_color=THEME["accent_purple"],
-                    hover_color=THEME["accent_purple_hover"]
-                )
-                self.kpi_status.value_label.configure(text="⏹ ZABLOKOWANY", text_color="#ef4444")
+            if getattr(self, "_revoking_in_progress", False):
+                return
+            self._revoking_in_progress = True
 
-            if hasattr(self, "badge_license"):
-                self.badge_license.configure(
-                    text="✕ BLOKADA DOSTĘPU",
-                    fg_color="#7f1d1d",
-                    hover_color="#991b1b",
-                    text_color="#fca5a5"
-                )
+            # 1. Zatrzymanie silnika monitorowania
+            try:
+                if hasattr(self, "engine") and self.engine.is_running:
+                    self.engine.stop()
+                    self.engine.shutdown()
+            except Exception:
+                pass
 
-            CyberModal.alert(
-                self,
-                "Blokada Dostępu KeyAuth",
-                f"Twój dostęp do programu został wstrzymany lub zablokowany przez administratora:\n\n{reason}\n\nProgram zostanie natychmiast zamknięty.",
-                accent_color="#ef4444"
-            )
+            # 2. Zatrzymanie heartbeat i wyczyszczenie autoryzacji
+            try:
+                if hasattr(self, "auth_engine"):
+                    self.auth_engine.stop_heartbeat()
+                    self.auth_engine.is_authenticated = False
+            except Exception:
+                pass
+
+            # 3. Aktualizacja UI przed zamknięciem
+            try:
+                if hasattr(self, "btn_toggle"):
+                    self.btn_toggle.configure(
+                        text="▶ ROZPOCZNIJ SNIPOWANIE",
+                        fg_color=THEME["accent_purple"],
+                        hover_color=THEME["accent_purple_hover"]
+                    )
+                if hasattr(self, "kpi_status"):
+                    self.kpi_status.value_label.configure(text="⏹ ZABLOKOWANY", text_color="#ef4444")
+
+                if hasattr(self, "badge_license"):
+                    self.badge_license.configure(
+                        text="✕ BLOKADA DOSTĘPU",
+                        fg_color="#7f1d1d",
+                        hover_color="#991b1b",
+                        text_color="#fca5a5"
+                    )
+            except Exception:
+                pass
+
+            # 4. Usunięcie zbanowanego klucza z konfiguracji
+            self.cfg["license_key"] = ""
+            try:
+                with open(self.cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(self.cfg, f, indent=4, ensure_ascii=False)
+            except Exception:
+                pass
+
+            # 5. Wyświetlenie ostrzeżenia o blokadzie
+            try:
+                CyberModal.alert(
+                    self,
+                    "Blokada Dostępu KeyAuth (BAN)",
+                    f"Twój dostęp do programu został wstrzymany lub zablokowany przez administratora:\n\n{reason}\n\nZostajesz natychmiast przeniesiony do okna logowania.",
+                    accent_color="#ef4444",
+                    icon_symbol="⛔"
+                )
+            except Exception:
+                pass
+
+            # 6. Oznaczenie relogin_required i powrót do okna logowania (zamknięcie okna programu)
+            self.relogin_required = True
+            self.relogin_reason = reason or "Twój klucz lub konto zostało zablokowane przez administratora (BAN)."
             try:
                 self.destroy()
             except Exception:
                 pass
-            sys.exit(0)
+
         self.after(0, _ui)
 
     def _on_admin_broadcast(self, broadcast_text: str):
@@ -4748,8 +4848,9 @@ class CyberAuthLauncher(ctk.CTk):
     Cybernetyczne okno startowe logowania i weryfikacji KeyAuth.
     Wymusza podanie Loginu, Hasła i Klucza Licencji przed uruchomieniem głównego okna snajpera.
     """
-    def __init__(self):
+    def __init__(self, kick_reason: Optional[str] = None):
         super().__init__()
+        self.kick_reason = kick_reason
         self.title("GRDZ-SNIPE // Bramka Dostępowa i Logowanie")
         self.geometry("520x640")
         self.resizable(False, False)
@@ -4943,6 +5044,14 @@ class CyberAuthLauncher(ctk.CTk):
         )
         self.lbl_status.pack(fill="x", padx=22, pady=(4, 8))
 
+        # Komunikat o wyrzuceniu po banie/wylogowaniu
+        if self.kick_reason:
+            self.lbl_status.configure(
+                text=f"⛔ {self.kick_reason}",
+                text_color="#ef4444"
+            )
+            self.ent_key.delete(0, "end")
+
         # Buttons
         self.btn_submit = ctk.CTkButton(
             card,
@@ -5022,12 +5131,23 @@ def run_app():
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
 
-    launcher = CyberAuthLauncher()
-    launcher.mainloop()
+    kick_reason = None
+    while True:
+        launcher = CyberAuthLauncher(kick_reason=kick_reason)
+        launcher.mainloop()
 
-    if launcher.authenticated:
+        if not launcher.authenticated:
+            break
+
+        kick_reason = None
         app = DealTrackerApp()
         app.mainloop()
+
+        if getattr(app, "relogin_required", False):
+            kick_reason = getattr(app, "relogin_reason", "Dostęp do programu został zablokowany (BAN). Zaloguj się ponownie.")
+            continue
+        else:
+            break
 
 
 if __name__ == "__main__":

@@ -428,10 +428,9 @@ def api_client_auth_login():
                 "message": "Ten klucz jest przypisany do innego urządzenia. Zresetuj HWID w profilu na stronie."
             }), 403
 
-        # Przypisanie klucza do konta jeśli nie był przypisany
-        if not user["license_key"]:
-            conn.execute("UPDATE users SET license_key = ? WHERE id = ?", (key, user["id"]))
-            conn.commit()
+        # Przypisanie klucza do konta użytkownika
+        conn.execute("UPDATE users SET license_key = ? WHERE id = ?", (key, user["id"]))
+        conn.commit()
 
         session_id = secrets.token_hex(16)
         conn.execute("""
@@ -661,12 +660,11 @@ def api_license_heartbeat():
         except Exception:
             pass
 
-        if session_id:
-            cur = conn.execute("SELECT action, message FROM active_sessions WHERE session_id = ?", (session_id,))
-            sess_row = cur.fetchone()
+        cur = conn.execute("SELECT action, message FROM active_sessions WHERE (session_id = ? AND session_id != '') OR license_key = ?", (session_id, key))
+        for sess_row in cur.fetchall():
             if sess_row and sess_row["action"] == "kill":
-                msg = sess_row["message"] or "Sesja została zdalnie zakończona przez panel administratora."
-                conn.execute("DELETE FROM active_sessions WHERE session_id = ?", (session_id,))
+                msg = sess_row["message"] or "Dostęp został zablokowany przez panel administratora (BAN)."
+                conn.execute("DELETE FROM active_sessions WHERE (session_id = ? AND session_id != '') OR license_key = ?", (session_id, key))
                 conn.commit()
                 return jsonify({"success": False, "status": "killed", "message": msg}), 200
 
@@ -3564,20 +3562,36 @@ def api_admin_toggle_status():
         conn.execute("UPDATE licenses SET status = ? WHERE key = ?", (new_status, key))
         if new_status in ("paused", "banned"):
             conn.execute("UPDATE active_sessions SET action = 'kill', message = ? WHERE license_key = ?",
-                         (f"Klucz został zablokowany (status: {new_status})", key))
+                         (f"Klucz licencji został zablokowany przez administratora (status: {new_status})", key))
             if new_status == "banned":
                 conn.execute("UPDATE users SET role = 'banned' WHERE license_key = ?", (key,))
+                hwids_to_ban = set()
                 cur = conn.execute("SELECT hwid FROM licenses WHERE key = ?", (key,))
                 r = cur.fetchone()
                 if r and r["hwid"]:
+                    hwids_to_ban.add(r["hwid"])
+                cur_s = conn.execute("SELECT hwid FROM active_sessions WHERE license_key = ?", (key,))
+                for s in cur_s.fetchall():
+                    if s["hwid"]:
+                        hwids_to_ban.add(s["hwid"])
+                cur_u = conn.execute("SELECT hwid FROM users WHERE license_key = ?", (key,))
+                for u in cur_u.fetchall():
+                    if u["hwid"]:
+                        hwids_to_ban.add(u["hwid"])
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                for h in hwids_to_ban:
                     conn.execute("INSERT OR REPLACE INTO banned_hwids (hwid, reason, banned_at) VALUES (?, ?, ?)",
-                                 (r["hwid"], f"Ban klucza {key}", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                                 (h, f"Ban powiązany z kluczem {key}", now_str))
         elif new_status == "active":
             conn.execute("UPDATE users SET role = 'user' WHERE license_key = ? AND role = 'banned'", (key,))
             cur = conn.execute("SELECT hwid FROM licenses WHERE key = ?", (key,))
             r = cur.fetchone()
             if r and r["hwid"]:
                 conn.execute("DELETE FROM banned_hwids WHERE hwid = ?", (r["hwid"],))
+            cur_s = conn.execute("SELECT hwid FROM active_sessions WHERE license_key = ?", (key,))
+            for s in cur_s.fetchall():
+                if s["hwid"]:
+                    conn.execute("DELETE FROM banned_hwids WHERE hwid = ?", (s["hwid"],))
 
         conn.commit()
         return jsonify({"status": "ok"})
