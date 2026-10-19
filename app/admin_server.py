@@ -12,6 +12,10 @@ import hashlib
 import webbrowser
 import threading
 import time
+import json
+import base64
+import urllib.parse
+import requests
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, send_file, make_response
@@ -193,6 +197,10 @@ def init_db():
         if not cur.fetchone():
             conn.execute("INSERT INTO settings (key, value) VALUES ('google_client_id', '')")
 
+        cur = conn.execute("SELECT value FROM settings WHERE key = 'google_client_secret'")
+        if not cur.fetchone():
+            conn.execute("INSERT INTO settings (key, value) VALUES ('google_client_secret', '')")
+
         # Seed domyślnego klucza deweloperskiego/administracyjnego
         cur = conn.execute("SELECT COUNT(*) FROM licenses")
         if cur.fetchone()[0] == 0:
@@ -230,6 +238,29 @@ def get_google_client_id():
     except Exception:
         pass
     return ""
+
+def get_google_client_secret():
+    """Pobiera Google Client Secret ze zmiennych środowiskowych lub bazy settings."""
+    env_sec = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+    if env_sec:
+        return env_sec
+    try:
+        conn = get_db()
+        cur = conn.execute("SELECT value FROM settings WHERE key = 'google_client_secret'")
+        row = cur.fetchone()
+        conn.close()
+        if row and row["value"]:
+            return row["value"].strip()
+    except Exception:
+        pass
+    return ""
+
+def get_google_redirect_uri():
+    """Zwraca kanoniczny adres callback dla Google OAuth 2.0 (obsługuje HTTPS i reverse proxy)."""
+    proto = request.headers.get("X-Forwarded-Proto", "").lower()
+    scheme = proto if proto in ("http", "https") else request.scheme
+    host = request.headers.get("X-Forwarded-Host") or request.host
+    return f"{scheme}://{host}/auth/google/callback"
 
 def generate_license_code(prefix="SNIPE"):
     chars = string.ascii_uppercase + string.digits
@@ -1125,22 +1156,23 @@ LANDING_HTML = """
 </html>
 """
 
-# Strona Google Sign-In (Wdrożenie zgodne z filmem "Add Google Sign-In in 2 Minutes - Code With Mark")
+# Strona Google Sign-In i konfiguracji OAuth 2.0 (według poradnika "Google OAuth EASY credentials setup")
 GOOGLE_OAUTH_MODAL_HTML = """
 <!DOCTYPE html>
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zaloguj się przez Google // GRDZ-SNIPE</title>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
-    <!-- Google Identity Services (GSI) Client SDK z filmu Code With Mark -->
+    <title>Google OAuth 2.0 // GRDZ-SNIPE</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+    <!-- Google Identity Services SDK -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            background-color: #f0f4f9;
-            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background-color: #070913;
+            color: #f8fafc;
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -1148,89 +1180,134 @@ GOOGLE_OAUTH_MODAL_HTML = """
             padding: 24px;
         }
         .google-card {
-            background: #ffffff;
-            border-radius: 28px;
+            background: #0e1424;
+            border-radius: 22px;
             width: 100%;
-            max-width: 480px;
-            padding: 40px;
-            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
-            border: 1px solid #e1e3e1;
+            max-width: 520px;
+            padding: 34px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+            border: 1px solid #1e293b;
             text-align: center;
-            position: relative;
         }
         .g-logo {
             display: flex;
             justify-content: center;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
         }
         .g-title {
-            font-size: 24px;
-            font-weight: 500;
-            color: #1f1f1f;
-            margin-bottom: 8px;
-            letter-spacing: -0.2px;
+            font-size: 22px;
+            font-weight: 700;
+            color: #f8fafc;
+            margin-bottom: 6px;
         }
         .g-sub {
-            font-size: 14px;
-            color: #444746;
-            margin-bottom: 24px;
+            font-size: 13px;
+            color: #94a3b8;
+            margin-bottom: 22px;
             line-height: 1.5;
         }
-        .g-sub strong { color: #1f1f1f; font-weight: 600; }
-
-        .btn-google-custom {
-            display: inline-flex;
+        .btn-google-action {
+            display: flex;
             align-items: center;
             justify-content: center;
             gap: 12px;
             background: #ffffff;
-            color: #3c4043;
-            border: 1px solid #dadce0;
-            border-radius: 8px;
-            padding: 12px 20px;
+            color: #1f2937;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 13px 20px;
             font-size: 14px;
-            font-weight: 500;
+            font-weight: 700;
             cursor: pointer;
-            transition: background-color .2s, box-shadow .2s;
             text-decoration: none;
             width: 100%;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.25);
         }
-        .btn-google-custom:hover {
-            background-color: #f8f9fa;
-            border-color: #d2e3fc;
-            box-shadow: 0 1px 3px rgba(60,64,67,0.3);
+        .btn-google-action:hover {
+            background-color: #f3f4f6;
+            transform: translateY(-1px);
         }
-
+        .copy-pill {
+            background: #070913;
+            border: 1px solid #334155;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-top: 6px;
+            word-break: break-all;
+        }
+        .btn-copy {
+            background: #1e293b;
+            color: #f8fafc;
+            border: 1px solid #475569;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .btn-copy:hover {
+            background: #334155;
+        }
+        .step-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #f97316;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            margin-right: 6px;
+        }
         .config-box {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
+            background: rgba(14, 20, 36, 0.7);
+            border: 1px solid #1e293b;
             border-radius: 14px;
-            padding: 16px;
-            margin-top: 24px;
+            padding: 18px;
+            margin-top: 20px;
             text-align: left;
             font-size: 12px;
-            color: #475569;
+            color: #94a3b8;
         }
         .config-box input {
             width: 100%;
             padding: 9px 12px;
-            border: 1px solid #cbd5e1;
+            background: #070913;
+            border: 1px solid #334155;
+            color: #f8fafc;
             border-radius: 8px;
             font-size: 12px;
-            margin-top: 6px;
-            margin-bottom: 10px;
+            margin-top: 5px;
+            margin-bottom: 12px;
             outline: none;
-            font-family: monospace;
+            font-family: 'JetBrains Mono', monospace;
         }
-        .config-box button {
-            background: #0b57d0;
+        .config-box input:focus {
+            border-color: #f97316;
+        }
+        .btn-save {
+            background: #f97316;
             color: #fff;
             border: none;
-            border-radius: 6px;
-            padding: 8px 14px;
+            border-radius: 8px;
+            padding: 10px 16px;
             font-size: 12px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
+            width: 100%;
+        }
+        .btn-save:hover {
+            background: #ea580c;
         }
     </style>
 </head>
@@ -1238,7 +1315,7 @@ GOOGLE_OAUTH_MODAL_HTML = """
 
 <div class="google-card">
     <div class="g-logo">
-        <svg width="40" height="40" viewBox="0 0 24 24">
+        <svg width="42" height="42" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
             <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
             <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
@@ -1246,107 +1323,107 @@ GOOGLE_OAUTH_MODAL_HTML = """
         </svg>
     </div>
 
-    <h1 class="g-title">Zaloguj się przez Google</h1>
-    <p class="g-sub">Jedno kliknięcie, aby połączyć się z <strong>GRDZ-SNIPE PRO</strong> i odebrać darmowy 1-dniowy dostęp.</p>
+    <h1 class="g-title">Logowanie Google OAuth 2.0</h1>
+    <p class="g-sub">Zaloguj się przez Google do <strong>GRDZ-SNIPE PRO</strong> i odbierz darmowy 1-dniowy dostęp testowy.</p>
 
-    <!-- Google Identity Services (GSI) Containers z filmu Code With Mark -->
+    <!-- Przycisk oficjalnego OAuth 2.0 z Google Cloud -->
+    {% if google_client_id %}
+    <div style="margin-bottom: 16px;">
+        <a href="/auth/google?go=1" class="btn-google-action">
+            <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+            Kontynuuj przy użyciu konta Google →
+        </a>
+    </div>
+
+    <!-- Kontener Google Identity Services (GSI) One-Tap / Button -->
     <div id="g_id_onload"
          data-client_id="{{ google_client_id }}"
          data-callback="handleCredentialResponse"
          data-auto_prompt="false">
     </div>
-
-    <div style="display: flex; justify-content: center; margin: 18px 0; min-height: 44px;">
-        <div class="g_id_signin"
-             data-type="standard"
-             data-shape="rectangular"
-             data-theme="outline"
-             data-text="sign_in_with"
-             data-size="large"
-             data-logo_alignment="left">
-        </div>
+    <div style="display: flex; justify-content: center; margin-bottom: 16px;">
+        <div class="g_id_signin" data-type="standard" data-shape="rectangular" data-theme="filled_black" data-text="sign_in_with" data-size="large"></div>
     </div>
+    {% endif %}
 
     <!-- Status Box -->
     <div id="googleAuthStatus"></div>
 
-    <!-- Szybki test / Symulacja (gdy użytkownik testuje bez zarejestrowanego Client ID w Google Cloud Console) -->
-    <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
-        <div style="font-size: 12px; color: #64748b; margin-bottom: 10px;">
-            Lub zaloguj się kontem testowym Google (1-kliknięcie):
+    <!-- Szybki test / Symulacja bez konieczności czekania na Google Cloud Console -->
+    <div style="margin-top: 18px; border-top: 1px solid #1e293b; padding-top: 18px;">
+        <div style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">
+            Dla natychmiastowego testu bez konfiguracji Google Cloud:
         </div>
-        <button type="button" class="btn-google-custom" onclick="simulateGoogleSignIn('kacper.sniper@gmail.com', 'Kacper')">
-            <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
-            Kontynuuj jako Kacper (Google)
+        <button type="button" class="btn-google-action" style="background: #1e1b4b; color: #c7d2fe; border-color: #3730a3;" onclick="simulateGoogleSignIn('kacper.sniper@gmail.com', 'Kacper')">
+            ⚡ Testowe Logowanie Google (1-kliknięcie jako Kacper)
         </button>
     </div>
 
-    <!-- Konfiguracja Google Client ID z filmu Code With Mark -->
-    <details class="config-box" {% if not google_client_id %}open{% endif %}>
-        <summary style="cursor: pointer; font-weight: 600; color: #0b57d0; margin-bottom: 8px;">
-            ⚙️ Google Client ID z filmu Code With Mark
+    <!-- Konfiguracja Google Cloud Credentials (zgodnie z filmem YouTube Appwrite) -->
+    <details class="config-box" {% if not google_client_id %}open{% endif %} style="margin-top: 20px;">
+        <summary style="cursor: pointer; font-weight: 700; color: #f97316; margin-bottom: 10px; font-size: 13px;">
+            ⚙️ Konfiguracja Google Cloud Console (z filmu YouTube)
         </summary>
-        <p style="margin-bottom: 6px; line-height: 1.4;">
-            Wklej swój <strong>Client ID</strong> wygenerowany w Google Cloud Console (zgodnie z filmem YouTube):
-        </p>
-        <form method="POST" action="/auth/google/save_client_id">
-            <input type="text" name="google_client_id" value="{{ google_client_id }}" placeholder="np. 1234567890-xxx.apps.googleusercontent.com" required>
-            <button type="submit">💾 Zapisz Client ID</button>
+        
+        <div style="line-height: 1.5; margin-bottom: 12px;">
+            <p style="margin-bottom: 6px;"><span class="step-badge">1</span>W Google Cloud Console dodaj <strong>Authorized redirect URI</strong>:</p>
+            <div class="copy-pill">
+                <span id="redUri">{{ redirect_uri }}</span>
+                <button type="button" class="btn-copy" onclick="copyText('redUri', this)">Kopiuj</button>
+            </div>
+        </div>
+
+        <div style="line-height: 1.5; margin-bottom: 14px;">
+            <p style="margin-bottom: 6px;"><span class="step-badge">2</span>W sekcji <strong>Authorized JavaScript origins</strong> dodaj:</p>
+            <div class="copy-pill">
+                <span id="origUri">{{ origin_url }}</span>
+                <button type="button" class="btn-copy" onclick="copyText('origUri', this)">Kopiuj</button>
+            </div>
+        </div>
+
+        <form method="POST" action="/auth/google/save_credentials">
+            <label style="font-weight: 600; font-size: 11px; text-transform: uppercase; color: #cbd5e1; display: block;">Google Client ID:</label>
+            <input type="text" name="google_client_id" value="{{ google_client_id }}" placeholder="np. 123456789-xxx.apps.googleusercontent.com" required>
+
+            <label style="font-weight: 600; font-size: 11px; text-transform: uppercase; color: #cbd5e1; display: block;">Google Client Secret:</label>
+            <input type="password" name="google_client_secret" value="{{ google_client_secret }}" placeholder="np. GOCSPX-xxxx...">
+
+            <button type="submit" class="btn-save">💾 Zapisz Dane Logowania Google</button>
         </form>
     </details>
 
-    <div style="margin-top: 24px;">
-        <a href="/login" style="font-size: 13px; color: #5f6368; text-decoration: none;">← Wróć do standardowego logowania</a>
+    <div style="margin-top: 22px;">
+        <a href="/login" style="font-size: 13px; color: #64748b; text-decoration: none;">← Wróć do standardowego logowania hasłem</a>
     </div>
 </div>
 
 <script>
-    // 1. Funkcja dekodująca JWT z filmu Code With Mark
-    function decodeJwtResponse(data) {
-        try {
-            var tokens = data.split(".");
-            var base64Url = tokens[1];
-            var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-            var jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-            }).join(''));
-            return JSON.parse(jsonPayload);
-        } catch (e) {
-            var tokens = data.split(".");
-            return JSON.parse(atob(tokens[1]));
-        }
+    function copyText(elemId, btn) {
+        const text = document.getElementById(elemId).innerText.trim();
+        navigator.clipboard.writeText(text).then(function() {
+            const old = btn.innerText;
+            btn.innerText = '✓ Skopiowano';
+            setTimeout(() => { btn.innerText = old; }, 2000);
+        });
     }
 
-    // 2. Callback Google Identity Services z oficjalnej dokumentacji
     function handleCredentialResponse(response) {
-        console.log("Encoded JWT ID token: " + response.credential);
-        const responsePayload = decodeJwtResponse(response.credential);
-
         document.getElementById('googleAuthStatus').innerHTML = `
-            <div style="background: #e6f4ea; color: #137333; padding: 12px; border-radius: 8px; font-size: 13px; margin-top: 14px; text-align: left;">
-                ✓ <strong>Autoryzacja udana!</strong> Weryfikacja tokenu Google...<br>
-                Przekierowywanie do portalu...
+            <div style="background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); padding: 12px; border-radius: 8px; font-size: 13px; margin: 14px 0;">
+                ✓ <strong>Autoryzacja udana!</strong> Logowanie do konta...
             </div>
         `;
-
-        // Send this token to your backend server to verify and log the user in
         fetch('/auth/google', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                token: response.credential,
-                email: responsePayload.email,
-                name: responsePayload.name,
-                sub: responsePayload.sub,
-                picture: responsePayload.picture
-            })
+            body: JSON.stringify({ token: response.credential })
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.success) {
                 window.location.href = data.redirect || '/';
             } else {
-                alert(data.message || 'Błąd logowania przez Google.');
+                alert(data.message || 'Błąd autoryzacji Google.');
             }
         })
         .catch(function(err) {
@@ -1355,11 +1432,10 @@ GOOGLE_OAUTH_MODAL_HTML = """
         });
     }
 
-    // Pomocnicza symulacja do natychmiastowych testów przed wygenerowaniem Client ID w Google Cloud
     function simulateGoogleSignIn(simEmail, simName) {
         document.getElementById('googleAuthStatus').innerHTML = `
-            <div style="background: #e8f0fe; color: #1a73e8; padding: 12px; border-radius: 8px; font-size: 13px; margin-top: 14px; text-align: left;">
-                ⚡ Logowanie przez Google...
+            <div style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 12px; border-radius: 8px; font-size: 13px; margin: 14px 0;">
+                ⚡ Logowanie kontem testowym Google...
             </div>
         `;
         fetch('/auth/google', {
@@ -3126,63 +3202,165 @@ http://grdzsnipe.com/profile
 
 @app.route("/auth/google", methods=["GET", "POST"])
 def auth_google_modal():
-    """Obsługa Google Identity Services (GSI) - GET wyświetla okno, POST przyjmuje token logowania."""
+    """
+    Punkt wejściowy autoryzacji Google OAuth 2.0 (jak w filmie YouTube Appwrite) oraz GSI.
+    - POST: przyjmuje token/dane logowania (JSON lub Form).
+    - GET:
+        * Jeśli parametr ?go=1 lub jest client_id i nie ma ?setup=1 -> przekierowuje prosto do Google Accounts.
+        * Jeśli brak client_id lub ?setup=1 -> wyświetla ekran konfiguracji i instrukcję z filmu.
+    """
     if request.method == "POST":
         return auth_google_callback()
-    client_id = get_google_client_id()
-    return render_template_string(GOOGLE_OAUTH_MODAL_HTML, google_client_id=client_id)
 
+    client_id = get_google_client_id()
+    client_secret = get_google_client_secret()
+    redirect_uri = get_google_redirect_uri()
+    origin_url = request.url_root.rstrip("/")
+
+    # Bezpośrednie przekierowanie do Google OAuth 2.0 (jeśli skonfigurowano i nie wymuszono setupu)
+    if client_id and (request.args.get("go") or not request.args.get("setup")):
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "access_type": "online",
+            "prompt": "select_account"
+        }
+        auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+        return redirect(auth_url)
+
+    return render_template_string(
+        GOOGLE_OAUTH_MODAL_HTML,
+        google_client_id=client_id,
+        google_client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        origin_url=origin_url
+    )
+
+@app.route("/auth/google/save_credentials", methods=["POST"])
 @app.route("/auth/google/save_client_id", methods=["POST"])
-def auth_google_save_client_id():
-    """Zapisuje Google Client ID z Google Cloud Console."""
+def auth_google_save_credentials():
+    """Zapisuje Google Client ID i Client Secret z Google Cloud Console."""
     client_id = request.form.get("google_client_id", "").strip()
+    client_secret = request.form.get("google_client_secret", "").strip()
     conn = get_db()
     try:
-        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('google_client_id', ?)", (client_id,))
+        if client_id:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('google_client_id', ?)", (client_id,))
+        if client_secret:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('google_client_secret', ?)", (client_secret,))
         conn.commit()
     finally:
         conn.close()
-    return redirect(url_for("auth_google_modal"))
+    return redirect(url_for("auth_google_modal", setup="1"))
 
-@app.route("/auth/google/callback", methods=["POST"])
+@app.route("/auth/google/callback", methods=["GET", "POST"])
 def auth_google_callback():
-    """Weryfikacja tokenu ID z Google Identity Services (GSI) i logowanie użytkownika."""
-    data = request.get_json(silent=True) or {}
-    if not data and request.form:
-        data = request.form.to_dict()
+    """
+    Oficjalny callback Google OAuth 2.0 (GET ?code=... z filmu YouTube Appwrite)
+    oraz weryfikacja tokenu ID z Google Identity Services (POST token).
+    """
+    email = ""
+    name = ""
+    sub = ""
 
-    credential = str(data.get("token") or data.get("credential", "")).strip()
-    email = str(data.get("email", "")).strip().lower()
-    name = str(data.get("name", "")).strip()
-    sub = str(data.get("sub", "")).strip()
-    picture = str(data.get("picture", "")).strip()
+    # Ścieżka 1: Przekierowanie zwrotne z Google Accounts (GET ?code=...)
+    if request.method == "GET":
+        err = request.args.get("error")
+        if err:
+            return render_template_string(LOGIN_HTML, error=f"Autoryzacja Google przerwana: {err}", google_client_id=get_google_client_id())
 
-    # Dekodowanie tokenu JWT po stronie backendu (dla pełnego bezpieczeństwa)
-    if credential:
-        try:
-            import base64
-            import json
-            parts = credential.split(".")
-            if len(parts) >= 2:
-                payload_b64 = parts[1]
-                rem = len(payload_b64) % 4
-                if rem > 0:
-                    payload_b64 += "=" * (4 - rem)
-                payload_json = base64.urlsafe_b64decode(payload_b64.encode("ascii")).decode("utf-8", errors="ignore")
-                jwt_data = json.loads(payload_json)
-                if jwt_data.get("email"):
-                    email = jwt_data.get("email", "").strip().lower()
-                if jwt_data.get("name"):
-                    name = jwt_data.get("name", "").strip()
-                elif jwt_data.get("given_name"):
-                    name = jwt_data.get("given_name", "").strip()
-                if jwt_data.get("sub"):
-                    sub = jwt_data.get("sub", "").strip()
-                if jwt_data.get("picture"):
-                    picture = jwt_data.get("picture", "").strip()
-        except Exception as e:
-            print("JWT decode error:", e)
+        code = request.args.get("code")
+        if code:
+            client_id = get_google_client_id()
+            client_secret = get_google_client_secret()
+            redirect_uri = get_google_redirect_uri()
 
+            token_url = "https://oauth2.googleapis.com/token"
+            token_data = {
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code"
+            }
+
+            try:
+                resp = requests.post(token_url, data=token_data, timeout=10)
+                if resp.status_code == 200:
+                    t_json = resp.json()
+                    access_token = t_json.get("access_token")
+                    id_token = t_json.get("id_token")
+
+                    # Pobranie profilu użytkownika
+                    if access_token:
+                        try:
+                            u_resp = requests.get(
+                                "https://www.googleapis.com/oauth2/v3/userinfo",
+                                headers={"Authorization": f"Bearer {access_token}"},
+                                timeout=10
+                            )
+                            if u_resp.status_code == 200:
+                                u_data = u_resp.json()
+                                email = str(u_data.get("email", "")).strip().lower()
+                                name = str(u_data.get("name") or u_data.get("given_name") or "").strip()
+                                sub = str(u_data.get("sub", "")).strip()
+                        except Exception as e_ui:
+                            print("[Google OAuth] Błąd userinfo:", e_ui)
+
+                    if not email and id_token:
+                        try:
+                            parts = id_token.split(".")
+                            if len(parts) >= 2:
+                                p_b64 = parts[1]
+                                rem = len(p_b64) % 4
+                                if rem > 0:
+                                    p_b64 += "=" * (4 - rem)
+                                jwt_d = json.loads(base64.urlsafe_b64decode(p_b64.encode("ascii")).decode("utf-8", errors="ignore"))
+                                email = str(jwt_d.get("email", "")).strip().lower()
+                                name = str(jwt_d.get("name") or jwt_d.get("given_name") or "").strip()
+                                sub = str(jwt_d.get("sub", "")).strip()
+                        except Exception as e_jwt:
+                            print("[Google OAuth] Błąd JWT:", e_jwt)
+                else:
+                    err_desc = resp.text
+                    try:
+                        err_desc = resp.json().get("error_description", err_desc)
+                    except Exception:
+                        pass
+                    return render_template_string(LOGIN_HTML, error=f"Błąd wymiany tokenu Google: {err_desc}", google_client_id=client_id)
+            except Exception as e_conn:
+                return render_template_string(LOGIN_HTML, error=f"Błąd połączenia z serwerami Google: {e_conn}", google_client_id=client_id)
+
+    # Ścieżka 2: Token ID przesłany przez POST (GSI lub symulacja)
+    else:
+        data = request.get_json(silent=True) or {}
+        if not data and request.form:
+            data = request.form.to_dict()
+
+        credential = str(data.get("token") or data.get("credential", "")).strip()
+        if credential:
+            try:
+                parts = credential.split(".")
+                if len(parts) >= 2:
+                    p_b64 = parts[1]
+                    rem = len(p_b64) % 4
+                    if rem > 0:
+                        p_b64 += "=" * (4 - rem)
+                    jwt_d = json.loads(base64.urlsafe_b64decode(p_b64.encode("ascii")).decode("utf-8", errors="ignore"))
+                    email = str(jwt_d.get("email", "")).strip().lower()
+                    name = str(jwt_d.get("name") or jwt_d.get("given_name") or "").strip()
+                    sub = str(jwt_d.get("sub", "")).strip()
+            except Exception as e:
+                print("[Google OAuth POST] JWT decode error:", e)
+
+        if not email:
+            email = str(data.get("email", "")).strip().lower()
+            name = str(data.get("name", "")).strip()
+            sub = str(data.get("sub", "")).strip()
+
+    # Domyślny fallback jeśli brak
     if not email or "@" not in email:
         email = f"user_{secrets.token_hex(3)}@gmail.com"
     if not name:
@@ -3190,12 +3368,24 @@ def auth_google_callback():
 
     conn = get_db()
     try:
-        cur = conn.execute("SELECT * FROM users WHERE email = ?", (email,))
+        cur = conn.execute("SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR (google_id = ? AND google_id != '')", (email, sub))
         user = cur.fetchone()
 
+        now_dt = datetime.now()
+        now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+
         if not user:
-            now_dt = datetime.now()
-            now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+            # Gwarancja unikalnego loginu (zapobiega błędowi UNIQUE constraint w bazie)
+            base_username = name.strip() or email.split("@")[0]
+            final_username = base_username
+            suffix = 1
+            while True:
+                u_check = conn.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", (final_username,)).fetchone()
+                if not u_check:
+                    break
+                suffix += 1
+                final_username = f"{base_username}_{suffix}"
+
             trial_key = generate_license_code("SNIPE-TRIAL")
             exp_dt = now_dt + timedelta(days=1)
             exp_str = exp_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -3203,26 +3393,24 @@ def auth_google_callback():
             conn.execute("""
                 INSERT INTO licenses (key, note, duration_days, created_at, expires_at, hwid, status)
                 VALUES (?, ?, 1, ?, ?, '', 'active')
-            """, (trial_key, f"Google Trial (1 Dzień): {name} ({email})", now_str, exp_str))
+            """, (trial_key, f"Google Trial (1 Dzień): {final_username} ({email})", now_str, exp_str))
 
             pwd_hash = hashlib.sha256(secrets.token_hex(16).encode()).hexdigest()
 
             cur = conn.execute("""
                 INSERT INTO users (username, email, password_hash, role, is_verified, license_key, created_at, google_id)
                 VALUES (?, ?, ?, 'user', 1, ?, ?, ?)
-            """, (name, email, pwd_hash, trial_key, now_str, sub or "google_oauth_verified"))
+            """, (final_username, email, pwd_hash, trial_key, now_str, sub or "google_oauth_verified"))
             conn.commit()
             uid = cur.lastrowid
             role = "user"
-            uname = name
+            uname = final_username
         else:
             uid = user["id"]
             role = user["role"]
             uname = user["username"]
 
             if not user["license_key"]:
-                now_dt = datetime.now()
-                now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
                 trial_key = generate_license_code("SNIPE-TRIAL")
                 exp_dt = now_dt + timedelta(days=1)
                 exp_str = exp_dt.strftime("%Y-%m-%d %H:%M:%S")
