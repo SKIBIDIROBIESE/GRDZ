@@ -901,8 +901,7 @@ GOOGLE_OAUTH_MODAL_HTML = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zaloguj się przez Google // GRDZ-SNIPE</title>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -922,6 +921,7 @@ GOOGLE_OAUTH_MODAL_HTML = """
             padding: 40px;
             box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
             border: 1px solid #e1e3e1;
+            text-align: left;
         }
         .g-logo {
             display: flex;
@@ -938,84 +938,124 @@ GOOGLE_OAUTH_MODAL_HTML = """
         .g-sub {
             font-size: 15px;
             color: #444746;
-            margin-bottom: 24px;
+            margin-bottom: 28px;
             line-height: 1.4;
         }
-        .g-sub strong { color: #1f1f1f; }
+        .g-sub strong { color: #1f1f1f; font-weight: 600; }
 
-        .gsi-wrapper {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 20px;
-        }
-
-        .divider {
+        .account-badge {
             display: flex;
             align-items: center;
-            gap: 12px;
-            margin: 20px 0;
-            color: #747775;
-            font-size: 13px;
+            gap: 14px;
+            padding: 12px 16px;
+            border: 1px solid #c4c7c5;
+            border-radius: 100px;
+            margin-bottom: 20px;
+            background: #f8fafc;
         }
-        .divider::before, .divider::after {
-            content: '';
+        .account-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #1a73e8;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 15px;
+        }
+        .account-details {
             flex: 1;
-            height: 1px;
-            background: #e1e3e1;
+            min-width: 0;
+        }
+        .account-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #1f1f1f;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .account-email {
+            font-size: 12px;
+            color: #444746;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .input-group {
-            margin-bottom: 18px;
-            text-align: left;
+            margin-bottom: 24px;
         }
         .input-label {
             display: block;
             font-size: 12px;
             font-weight: 500;
             color: #444746;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
         }
         .g-input {
             width: 100%;
             border: 1px solid #747775;
             border-radius: 8px;
-            padding: 13px 16px;
-            font-size: 14px;
+            padding: 14px 16px;
+            font-size: 15px;
             outline: none;
             transition: border-color 0.2s, box-shadow 0.2s;
             color: #1f1f1f;
+            background: #fff;
         }
         .g-input:focus {
             border-color: #0b57d0;
             box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.2);
         }
 
-        .btn-submit {
+        .btn-google-primary {
             background: #0b57d0;
             color: #ffffff;
             border: none;
             border-radius: 100px;
-            padding: 13px 24px;
+            padding: 14px 24px;
             font-size: 14px;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
             width: 100%;
-            transition: background 0.2s;
+            transition: background 0.2s, box-shadow 0.2s;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
+            gap: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
         }
-        .btn-submit:hover { background: #0842a0; }
-        .cancel-link {
+        .btn-google-primary:hover {
+            background: #0842a0;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+
+        .switch-account {
             display: block;
             text-align: center;
-            margin-top: 20px;
+            margin-top: 14px;
             font-size: 13px;
             color: #0b57d0;
             text-decoration: none;
+            cursor: pointer;
+            background: none;
+            border: none;
+            width: 100%;
         }
-        .cancel-link:hover { text-decoration: underline; }
+        .switch-account:hover { text-decoration: underline; }
+
+        .cancel-link {
+            display: block;
+            text-align: center;
+            margin-top: 24px;
+            font-size: 13px;
+            color: #747775;
+            text-decoration: none;
+        }
+        .cancel-link:hover { color: #1f1f1f; text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -1033,57 +1073,80 @@ GOOGLE_OAUTH_MODAL_HTML = """
     <h1 class="g-title">Zaloguj się przez Google</h1>
     <p class="g-sub">Przejdź do aplikacji <strong>GRDZ-SNIPE</strong></p>
 
-    <!-- Oficjalny przycisk Google One-Tap / Identity Services (dla każdego użytkownika) -->
-    <div id="g_id_onload"
-         data-client_id="{{ google_client_id or 'dummy_client_id.apps.googleusercontent.com' }}"
-         data-context="signin"
-         data-ux_mode="popup"
-         data-callback="handleCredentialResponse"
-         data-auto_prompt="false">
-    </div>
-    <div class="gsi-wrapper">
-        <div class="g_id_signin"
-             data-type="standard"
-             data-shape="pill"
-             data-theme="outline"
-             data-text="continue_with"
-             data-size="large"
-             data-logo_alignment="left">
-        </div>
-    </div>
-
-    <div class="divider">lub wprowadź dane swojego konta Google</div>
-
-    <!-- Formularz autoryzacji Google OAuth (czyste pola dla każdego użytkownika) -->
-    <form method="POST" action="/auth/google/select" id="directGoogleForm">
-        <div class="input-group">
-            <label class="input-label">Twój Adres E-mail Google (@gmail.com)</label>
-            <input type="email" name="email" id="gEmailInput" class="g-input" placeholder="twojadres@gmail.com" required autofocus>
+    <!-- Formularz z JEDNĄ opcją logowania -->
+    <form method="POST" action="/auth/google/select" id="googleAuthForm" onsubmit="saveUserAccount()">
+        <!-- Wybór wcześniej używanego konta (jeśli istnieje w przeglądarce) -->
+        <div id="rememberedAccountBlock" style="display: none;">
+            <div class="account-badge">
+                <div class="account-avatar" id="savedAvatar">G</div>
+                <div class="account-details">
+                    <div class="account-name" id="savedName">Konto Google</div>
+                    <div class="account-email" id="savedEmailDisplay">user@gmail.com</div>
+                </div>
+            </div>
+            <input type="hidden" name="email" id="rememberedEmailInput">
+            <input type="hidden" name="name" id="rememberedNameInput">
+            <button type="submit" class="btn-google-primary">
+                <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+                Kontynuuj przy użyciu konta Google
+            </button>
+            <button type="button" class="switch-account" onclick="showManualInput()">Użyj innego konta Google</button>
         </div>
 
-        <div class="input-group">
-            <label class="input-label">Imię i Nazwisko lub Nick</label>
-            <input type="text" name="name" id="gNameInput" class="g-input" placeholder="np. Jan Kowalski" required>
+        <!-- Wpisanie konta Google dla każdego użytkownika -->
+        <div id="manualAccountBlock">
+            <div class="input-group">
+                <label class="input-label">Adres e-mail konta Google</label>
+                <input type="email" name="email" id="gEmailInput" class="g-input" placeholder="twojadres@gmail.com" required autofocus>
+            </div>
+            <button type="submit" class="btn-google-primary">
+                <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+                Kontynuuj przy użyciu konta Google
+            </button>
         </div>
-
-        <button type="submit" class="btn-submit">
-            Zaloguj jako użytkownik Google →
-        </button>
     </form>
 
-    <!-- Ukryty formularz odbierający JWT token z przycisku Google -->
-    <form method="POST" action="/auth/google/select" id="jwtGoogleForm" style="display: none;">
-        <input type="hidden" name="credential" id="jwtCredential">
-    </form>
-
-    <a href="/login" class="cancel-link">← Anuluj i wróć do logowania</a>
+    <a href="/login" class="cancel-link">Wróć do logowania hasłem</a>
 </div>
 
 <script>
-    function handleCredentialResponse(response) {
-        if (response && response.credential) {
-            document.getElementById('jwtCredential').value = response.credential;
-            document.getElementById('jwtGoogleForm').submit();
+    (function initGoogleAuth() {
+        var saved = localStorage.getItem('grdz_google_user');
+        if (saved) {
+            try {
+                var data = JSON.parse(saved);
+                if (data.email) {
+                    document.getElementById('savedEmailDisplay').innerText = data.email;
+                    document.getElementById('savedName').innerText = data.name || data.email.split('@')[0];
+                    document.getElementById('savedAvatar').innerText = (data.name || data.email)[0].toUpperCase();
+                    document.getElementById('rememberedEmailInput').value = data.email;
+                    document.getElementById('rememberedNameInput').value = data.name || '';
+                    document.getElementById('rememberedAccountBlock').style.display = 'block';
+                    document.getElementById('manualAccountBlock').style.display = 'none';
+                    return;
+                }
+            } catch (e) {}
+        }
+        document.getElementById('manualAccountBlock').style.display = 'block';
+        document.getElementById('rememberedAccountBlock').style.display = 'none';
+    })();
+
+    function showManualInput() {
+        document.getElementById('rememberedAccountBlock').style.display = 'none';
+        document.getElementById('manualAccountBlock').style.display = 'block';
+        var input = document.getElementById('gEmailInput');
+        if (input) {
+            input.value = '';
+            input.focus();
+        }
+    }
+
+    function saveUserAccount() {
+        var emailInput = document.getElementById('gEmailInput');
+        var email = (emailInput && emailInput.value) ? emailInput.value.trim() : document.getElementById('rememberedEmailInput').value;
+        if (email) {
+            var name = email.split('@')[0];
+            localStorage.setItem('grdz_google_user', JSON.stringify({ email: email, name: name }));
         }
     }
 </script>
