@@ -1920,6 +1920,14 @@ class MonitorEngine:
     def _loop(self):
         while not self._stop_event.is_set():
             try:
+                # Weryfikacja aktywnej licencji przed kazdym cyklem skanowania
+                from auth_engine import get_auth_engine
+                auth = get_auth_engine()
+                if not auth.is_authenticated:
+                    self.on_status("⛔ BLOKADA KEYAUTH: Brak aktywnej licencji lub BAN. Zatrzymywanie...")
+                    self.stop()
+                    break
+
                 self.scan_once()
             except Exception as e:
                 self.on_status(f"Błąd pętli: {e}")
@@ -1932,6 +1940,11 @@ class MonitorEngine:
 
     def start(self):
         if self.is_running:
+            return
+        from auth_engine import get_auth_engine
+        auth = get_auth_engine()
+        if not auth.is_authenticated:
+            self.on_status("⛔ BLOKADA: Wymagana aktywna autoryzacja KeyAuth.")
             return
         self.is_running = True
         self._stop_event.clear()

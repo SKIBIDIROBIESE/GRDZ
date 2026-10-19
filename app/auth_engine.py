@@ -141,27 +141,78 @@ class AuthEngine:
                 status="empty"
             )
 
-        # Klucze Master Dev Override do celow ratunkowych i lokalnych
-        if key in ("GRDZ-MASTER-KEY-2026", "GRDZ-DEV-OVERRIDE", "ADMIN-OVERRIDE", "SNIPE-MASTER-OVERRIDE"):
-            self.is_authenticated = True
-            self.license_info = {
-                "key": key,
-                "status": "active",
-                "type": "Master Developer License",
-                "expires_at": "Bezterminowa (Lifetime)",
-                "note": "Konto Administratora / Master Dev",
-                "hwid": self.hwid
-            }
-            self.session_id = f"master-{int(time.time())}"
+    def authenticate_user(self, identity: str, password: str, license_key: str) -> AuthResult:
+        """
+        Główna weryfikacja logowania przedstartowego:
+        Weryfikuje login, hasło oraz klucz licencyjny ze stroną i serwerem KeyAuth.
+        Ściśle sprawdza status BAN na poziomie konta, licencji oraz sprzętu (HWID).
+        """
+        ident = identity.strip()
+        pwd = password.strip()
+        key = license_key.strip()
+
+        if not ident:
+            return AuthResult(False, "Podaj login lub adres e-mail do konta na stronie.", status="empty")
+        if not pwd:
+            return AuthResult(False, "Wprowadź hasło do swojego konta.", status="empty")
+        if not key:
+            return AuthResult(False, "Wprowadź klucz licencyjny (autoryzacji).", status="empty")
+
+        urls = [self.auth_server_url]
+        for extra in ["https://grdzsnipe.onrender.com", "http://grdzsnipe.com", "http://127.0.0.1:5000", "http://localhost:5000"]:
+            if extra not in urls:
+                urls.append(extra)
+
+        last_error = "Nie można połączyć się z serwerem autoryzacji. Upewnij się, że masz połączenie z siecią."
+
+        for server_url in urls:
+            try:
+                resp = requests.post(
+                    f"{server_url}/api/client/auth_login",
+                    json={
+                        "identity": ident,
+                        "password": pwd,
+                        "key": key,
+                        "license_key": key,
+                        "hwid": self.hwid,
+                        "app_version": "v2.6 PRO"
+                    },
+                    headers={"Content-Type": "application/json"},
+                    timeout=5
+                )
+                data = resp.json() if resp.status_code in (200, 400, 401, 403) else {}
+                status_code = resp.status_code
+
+                if status_code == 200 and (data.get("success") or data.get("valid")):
+                    self.is_authenticated = True
+                    self.session_id = data.get("session_id", "")
+                    self.license_info = data.get("info", {})
+                    self.license_key = key
+                    self._active_server_url = server_url
+                    self.start_heartbeat(key)
+                    return AuthResult(True, data.get("message", "Autoryzacja udana!"), status="active", info=self.license_info)
+                elif data.get("message"):
+                    self.is_authenticated = False
+                    return AuthResult(False, data.get("message"), status=data.get("status", "denied"))
+            except Exception:
+                continue
+
+        return AuthResult(False, last_error, status="connection_failed")
+
+    def verify_license(self, license_key: str) -> AuthResult:
+        """
+        Weryfikacja klucza licencyjnego z serwerem panelu admina.
+        """
+        key = license_key.strip()
+        if not key:
             return AuthResult(
-                True,
-                "Licencja Master Administratora aktywna (Pełny dostęp).",
-                status="active",
-                info=self.license_info
+                False,
+                "Wprowadź klucz licencyjny, aby odblokować program.",
+                status="empty"
             )
 
         urls = [self.auth_server_url]
-        for extra in ["http://grdzsnipe.com", "http://127.0.0.1:5000", "http://localhost:5000", "http://127.0.0.1"]:
+        for extra in ["https://grdzsnipe.onrender.com", "http://grdzsnipe.com", "http://127.0.0.1:5000", "http://localhost:5000"]:
             if extra not in urls:
                 urls.append(extra)
 
@@ -183,7 +234,7 @@ class AuthEngine:
                         "action": self.current_action
                     },
                     headers={"Content-Type": "application/json"},
-                    timeout=3
+                    timeout=4
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -216,12 +267,13 @@ class AuthEngine:
                             status=data.get("status", "invalid")
                         )
                 elif resp.status_code in (401, 403):
+                    self.is_authenticated = False
                     try:
                         data = resp.json()
                         return AuthResult(
                             False,
-                            data.get("message", "Brak uprawnień lub nieprawidłowy klucz."),
-                            status=data.get("status", "denied")
+                            data.get("message", "Brak uprawnień lub zablokowany klucz (BAN)."),
+                            status=data.get("status", "banned")
                         )
                     except Exception:
                         pass
@@ -283,7 +335,7 @@ class AuthEngine:
         def _heartbeat_worker():
             server_url = getattr(self, "_active_server_url", self.auth_server_url)
             while self.heartbeat_running:
-                time.sleep(12)
+                time.sleep(5)
                 if not self.heartbeat_running:
                     break
                 try:

@@ -156,6 +156,15 @@ def init_db():
             )
         """)
 
+        # Tabela trwale zablokowanych stacji roboczych (HWID Blacklist - BAN)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS banned_hwids (
+                hwid TEXT PRIMARY KEY,
+                reason TEXT DEFAULT '',
+                banned_at TEXT NOT NULL
+            )
+        """)
+
         # Domyślny administrator (login: admin, hasło: admin123)
         cur = conn.execute("SELECT id FROM users WHERE username = 'admin'")
         if not cur.fetchone():
@@ -244,6 +253,181 @@ def get_current_user_and_license():
 # ---------------------------------------------------------
 # Client API Endpoints (Used by Desktop App)
 # ---------------------------------------------------------
+
+@app.route("/api/client/auth_login", methods=["POST"])
+def api_client_auth_login():
+    """
+    Dedykowany punkt wejściowy launchera aplikacji desktopowej:
+    Wymaga podania loginu/maila, hasła do konta oraz klucza licencyjnego.
+    Ściśle weryfikuje status BAN na poziomie konta, licencji oraz HWID stacji roboczej.
+    """
+    data = request.get_json(silent=True) or {}
+    identity = str(data.get("identity") or data.get("username") or data.get("email", "")).strip()
+    pwd = str(data.get("password", "")).strip()
+    key = str(data.get("key") or data.get("license_key", "")).strip()
+    hwid = str(data.get("hwid", "")).strip()
+    app_version = str(data.get("app_version", "v2.6 PRO")).strip()
+    ip_addr = request.remote_addr or request.headers.get("X-Forwarded-For", "127.0.0.1")
+    now_dt = datetime.now()
+    now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    if not identity or not pwd or not key:
+        return jsonify({
+            "success": False,
+            "status": "missing_fields",
+            "message": "Wymagane jest podanie loginu, hasła oraz klucza autoryzacji."
+        }), 400
+
+    conn = get_db()
+    try:
+        # 1. Global Killswitch
+        cur = conn.execute("SELECT value FROM settings WHERE key = 'killswitch'")
+        row = cur.fetchone()
+        if row and row["value"] == "1":
+            return jsonify({
+                "success": False,
+                "status": "killswitch",
+                "message": "Aplikacja jest tymczasowo wstrzymana przez administratora (Global Killswitch)."
+            }), 403
+
+        # 2. Blokada czarnej listy HWID (BANNED HWID)
+        if hwid:
+            cur = conn.execute("SELECT * FROM banned_hwids WHERE hwid = ?", (hwid,))
+            if cur.fetchone():
+                return jsonify({
+                    "success": False,
+                    "status": "banned",
+                    "message": "Twój komputer (HWID) został trwale zablokowany przez administratora (BAN)."
+                }), 403
+
+        # 3. Weryfikacja konta użytkownika (Login + Hasło)
+        cur = conn.execute("SELECT * FROM users WHERE username = ? OR email = ?", (identity, identity.lower()))
+        user = cur.fetchone()
+        if not user:
+            return jsonify({
+                "success": False,
+                "status": "invalid_credentials",
+                "message": "Nie znaleziono konta o podanym loginie lub adresie e-mail."
+            }), 401
+
+        pwd_hash = hashlib.sha256(pwd.encode()).hexdigest()
+        if pwd_hash != user["password_hash"]:
+            return jsonify({
+                "success": False,
+                "status": "invalid_credentials",
+                "message": "Wprowadzone hasło do konta jest nieprawidłowe."
+            }), 401
+
+        # 4. Sprawdzenie statusu zablokowanego konta (User BAN)
+        if user["role"] == "banned" or user["is_verified"] == -1:
+            return jsonify({
+                "success": False,
+                "status": "banned",
+                "message": "Twoje konto użytkownika zostało trwale zablokowane przez administratora (BAN)."
+            }), 403
+
+        # 5. Weryfikacja klucza licencji
+        cur = conn.execute("SELECT * FROM licenses WHERE key = ?", (key,))
+        lic = cur.fetchone()
+        if not lic:
+            return jsonify({
+                "success": False,
+                "status": "invalid_key",
+                "message": "Podany klucz licencyjny nie istnieje w systemie."
+            }), 401
+
+        # 6. Sprawdzenie statusu licencji (BAN / PAUSE / EXPIRED)
+        lic_status = lic["status"]
+        if lic_status == "banned":
+            if hwid:
+                conn.execute("INSERT OR REPLACE INTO banned_hwids (hwid, reason, banned_at) VALUES (?, ?, ?)",
+                             (hwid, f"Próba użycia zbanowanego klucza {key}", now_str))
+                conn.commit()
+            return jsonify({
+                "success": False,
+                "status": "banned",
+                "message": "Ten klucz licencyjny został trwale zablokowany przez administratora (BAN)."
+            }), 403
+
+        if lic_status == "paused":
+            return jsonify({
+                "success": False,
+                "status": "paused",
+                "message": "Dostęp dla tego klucza jest tymczasowo wstrzymany (Pauza)."
+            }), 403
+
+        try:
+            exp_dt = datetime.strptime(lic["expires_at"], "%Y-%m-%d %H:%M:%S")
+            if now_dt > exp_dt:
+                conn.execute("UPDATE licenses SET status = 'expired' WHERE key = ?", (key,))
+                conn.commit()
+                return jsonify({
+                    "success": False,
+                    "status": "expired",
+                    "message": f"Ważność tego klucza wygasła dnia: {lic['expires_at']}."
+                }), 403
+        except Exception:
+            pass
+
+        # 7. Zabezpieczenie Trial HWID (dokładnie 1 trial na komputer)
+        is_trial = key.startswith("SNIPE-TRIAL") or (lic["duration_days"] is not None and lic["duration_days"] <= 1)
+        if is_trial and hwid:
+            cur = conn.execute("SELECT * FROM used_trials WHERE hwid = ?", (hwid,))
+            trial_row = cur.fetchone()
+            if trial_row and trial_row["license_key"] != key:
+                return jsonify({
+                    "success": False,
+                    "status": "trial_already_used",
+                    "message": "Ten komputer (HWID) wykorzystał już darmowy 1-dniowy Trial na innym koncie."
+                }), 403
+            conn.execute("INSERT OR REPLACE INTO used_trials (hwid, license_key, claimed_at, ip_address) VALUES (?, ?, ?, ?)",
+                         (hwid, key, now_str, ip_addr))
+            conn.commit()
+
+        # 8. Powiązanie i weryfikacja HWID
+        lic_hwid = lic["hwid"]
+        if not lic_hwid:
+            conn.execute("UPDATE licenses SET hwid = ?, last_ip = ?, last_seen = ? WHERE key = ?",
+                         (hwid, ip_addr, now_str, key))
+            conn.commit()
+            lic_hwid = hwid
+        elif lic_hwid != hwid:
+            return jsonify({
+                "success": False,
+                "status": "hwid_mismatch",
+                "message": "Ten klucz jest przypisany do innego urządzenia. Zresetuj HWID w profilu na stronie."
+            }), 403
+
+        # Przypisanie klucza do konta jeśli nie był przypisany
+        if not user["license_key"]:
+            conn.execute("UPDATE users SET license_key = ? WHERE id = ?", (key, user["id"]))
+            conn.commit()
+
+        session_id = secrets.token_hex(16)
+        conn.execute("""
+            INSERT OR REPLACE INTO active_sessions (session_id, license_key, hwid, ip_address, app_version, status, last_heartbeat, action)
+            VALUES (?, ?, ?, ?, ?, 'active', ?, 'Autoryzowano w programie')
+        """, (session_id, key, hwid, ip_addr, app_version, now_str))
+        conn.execute("UPDATE licenses SET last_seen = ?, last_ip = ? WHERE key = ?", (now_str, ip_addr, key))
+        conn.commit()
+
+        return jsonify({
+            "success": True,
+            "status": "active",
+            "message": f"Witaj, {user['username']}! Autoryzacja pomyślna.",
+            "session_id": session_id,
+            "user": user["username"],
+            "info": {
+                "key": key,
+                "hwid": lic_hwid,
+                "status": "active",
+                "expires_at": lic["expires_at"],
+                "note": lic["note"],
+                "username": user["username"]
+            }
+        })
+    finally:
+        conn.close()
 
 @app.route("/api/license/verify", methods=["POST"])
 def api_verify_license():
@@ -407,6 +591,26 @@ def api_license_heartbeat():
                 "success": False,
                 "status": "invalid",
                 "message": "Licencja została usunięta przez administratora."
+            }), 200
+
+        # Weryfikacja czarnej listy HWID
+        if hwid:
+            cur = conn.execute("SELECT * FROM banned_hwids WHERE hwid = ?", (hwid,))
+            if cur.fetchone():
+                return jsonify({
+                    "success": False,
+                    "status": "banned",
+                    "message": "Ten komputer (HWID) został trwale zablokowany przez administratora (BAN)."
+                }), 200
+
+        # Weryfikacja czy konto powiązane z kluczem nie ma bana
+        cur = conn.execute("SELECT role FROM users WHERE license_key = ?", (key,))
+        u_row = cur.fetchone()
+        if u_row and u_row["role"] == "banned":
+            return jsonify({
+                "success": False,
+                "status": "banned",
+                "message": "Konto powiązane z tym kluczem zostało trwale zablokowane przez administratora (BAN)."
             }), 200
 
         if lic["status"] in ("banned", "paused"):
@@ -3145,6 +3349,20 @@ def api_admin_toggle_status():
         if new_status in ("paused", "banned"):
             conn.execute("UPDATE active_sessions SET action = 'kill', message = ? WHERE license_key = ?",
                          (f"Klucz został zablokowany (status: {new_status})", key))
+            if new_status == "banned":
+                conn.execute("UPDATE users SET role = 'banned' WHERE license_key = ?", (key,))
+                cur = conn.execute("SELECT hwid FROM licenses WHERE key = ?", (key,))
+                r = cur.fetchone()
+                if r and r["hwid"]:
+                    conn.execute("INSERT OR REPLACE INTO banned_hwids (hwid, reason, banned_at) VALUES (?, ?, ?)",
+                                 (r["hwid"], f"Ban klucza {key}", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        elif new_status == "active":
+            conn.execute("UPDATE users SET role = 'user' WHERE license_key = ? AND role = 'banned'", (key,))
+            cur = conn.execute("SELECT hwid FROM licenses WHERE key = ?", (key,))
+            r = cur.fetchone()
+            if r and r["hwid"]:
+                conn.execute("DELETE FROM banned_hwids WHERE hwid = ?", (r["hwid"],))
+
         conn.commit()
         return jsonify({"status": "ok"})
     finally:

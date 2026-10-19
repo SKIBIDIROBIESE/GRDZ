@@ -4716,10 +4716,14 @@ class DealTrackerApp(ctk.CTk):
             CyberModal.alert(
                 self,
                 "Blokada Dostępu KeyAuth",
-                f"Twój dostęp do programu został wstrzymany lub zablokowany przez administratora:\n\n{reason}\n\nSkontaktuj się z administratorem lub wprowadź nowy klucz.",
+                f"Twój dostęp do programu został wstrzymany lub zablokowany przez administratora:\n\n{reason}\n\nProgram zostanie natychmiast zamknięty.",
                 accent_color="#ef4444"
             )
-            CyberLicenseModal(self, self.auth_engine, on_success=self._on_license_modal_success, allow_cancel=False)
+            try:
+                self.destroy()
+            except Exception:
+                pass
+            sys.exit(0)
         self.after(0, _ui)
 
     def _on_admin_broadcast(self, broadcast_text: str):
@@ -4738,6 +4742,293 @@ class DealTrackerApp(ctk.CTk):
         self.engine.shutdown()
         self.destroy()
 
+
+class CyberAuthLauncher(ctk.CTk):
+    """
+    Cybernetyczne okno startowe logowania i weryfikacji KeyAuth.
+    Wymusza podanie Loginu, Hasła i Klucza Licencji przed uruchomieniem głównego okna snajpera.
+    """
+    def __init__(self):
+        super().__init__()
+        self.title("GRDZ-SNIPE // Bramka Dostępowa i Logowanie")
+        self.geometry("520x640")
+        self.resizable(False, False)
+        self.configure(fg_color="#0a0614")
+
+        # Ikona
+        try:
+            ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+            if os.path.exists(ico_path):
+                self.iconbitmap(ico_path)
+        except Exception:
+            pass
+
+        self.cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        self.cfg = {}
+        if os.path.exists(self.cfg_path):
+            try:
+                with open(self.cfg_path, "r", encoding="utf-8") as f:
+                    self.cfg = json.load(f)
+            except Exception:
+                pass
+
+        self.auth_engine = get_auth_engine(self.cfg)
+        self.authenticated = False
+        self.user_info = {}
+
+        self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Wyśrodkowanie okna na ekranie
+        self.update_idletasks()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        x = (self.winfo_screenwidth() // 2) - (w // 2)
+        y = (self.winfo_screenheight() // 2) - (h // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _on_close(self):
+        self.authenticated = False
+        self.destroy()
+
+    def _build_ui(self):
+        card = ctk.CTkFrame(self, fg_color="#0e0a1f", corner_radius=16, border_width=1, border_color="#3c2666")
+        card.pack(fill="both", expand=True, padx=14, pady=14)
+
+        # Header
+        top_bar = ctk.CTkFrame(card, fg_color="transparent")
+        top_bar.pack(fill="x", padx=22, pady=(20, 10))
+
+        ctk.CTkLabel(
+            top_bar,
+            text="⚡ GRDZ-SNIPE V2.6 PRO",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color="#f97316"
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            top_bar,
+            text="Autoryzacja dostępu: zaloguj się danymi ze strony oraz podaj klucz licencji.",
+            font=ctk.CTkFont(size=11),
+            text_color="#a78bfa"
+        ).pack(anchor="w", pady=(2, 0))
+
+        # HWID Info Box
+        hwid_box = ctk.CTkFrame(card, fg_color="#150f2b", corner_radius=10, border_width=1, border_color="#2c1e4a")
+        hwid_box.pack(fill="x", padx=22, pady=(0, 14))
+
+        ctk.CTkLabel(
+            hwid_box,
+            text="TWÓJ IDENTYFIKATOR SPRZĘTOWY (HWID):",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#71717a"
+        ).pack(anchor="w", padx=12, pady=(8, 2))
+
+        hwid_row = ctk.CTkFrame(hwid_box, fg_color="transparent")
+        hwid_row.pack(fill="x", padx=12, pady=(0, 8))
+
+        ctk.CTkLabel(
+            hwid_row,
+            text=self.auth_engine.hwid,
+            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
+            text_color="#38bdf8"
+        ).pack(side="left")
+
+        def _copy_hwid():
+            self.clipboard_clear()
+            self.clipboard_append(self.auth_engine.hwid)
+            btn_copy.configure(text="✓ Skopiowano!")
+            self.after(2000, lambda: btn_copy.configure(text="Kopiuj"))
+
+        btn_copy = ctk.CTkButton(
+            hwid_row,
+            text="Kopiuj",
+            width=65,
+            height=24,
+            font=ctk.CTkFont(size=11),
+            fg_color="#1e1b4b",
+            hover_color="#312e81",
+            command=_copy_hwid
+        )
+        btn_copy.pack(side="right")
+
+        # Form Container
+        form = ctk.CTkFrame(card, fg_color="transparent")
+        form.pack(fill="x", padx=22)
+
+        # Login / Email
+        ctk.CTkLabel(
+            form,
+            text="LOGIN LUB ADRES E-MAIL ZE STRONY",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#e2e8f0"
+        ).pack(anchor="w", pady=(0, 4))
+
+        saved_login = self.cfg.get("user_login") or self.cfg.get("login_identity", "")
+        self.ent_identity = ctk.CTkEntry(
+            form,
+            placeholder_text="np. kgradzki lub twoj@email.com",
+            height=38,
+            font=ctk.CTkFont(size=13),
+            fg_color="#150f2b",
+            border_color="#3c2666"
+        )
+        self.ent_identity.pack(fill="x", pady=(0, 10))
+        if saved_login:
+            self.ent_identity.insert(0, saved_login)
+
+        # Password
+        ctk.CTkLabel(
+            form,
+            text="HASŁO DO KONTA NA STRONIE",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#e2e8f0"
+        ).pack(anchor="w", pady=(0, 4))
+
+        self.ent_password = ctk.CTkEntry(
+            form,
+            placeholder_text="Wpisz hasło do konta...",
+            show="*",
+            height=38,
+            font=ctk.CTkFont(size=13),
+            fg_color="#150f2b",
+            border_color="#3c2666"
+        )
+        self.ent_password.pack(fill="x", pady=(0, 4))
+
+        def _toggle_pwd():
+            self.ent_password.configure(show="" if cb_show.get() else "*")
+
+        cb_show = ctk.CTkCheckBox(
+            form,
+            text="Pokaż hasło",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8",
+            checkbox_width=16,
+            checkbox_height=16,
+            command=_toggle_pwd
+        )
+        cb_show.pack(anchor="w", pady=(0, 10))
+
+        # License Key
+        ctk.CTkLabel(
+            form,
+            text="KLUCZ AUTORYZACJI (KEYAUTH LICENCJA)",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#e2e8f0"
+        ).pack(anchor="w", pady=(0, 4))
+
+        saved_key = self.cfg.get("license_key", "")
+        self.ent_key = ctk.CTkEntry(
+            form,
+            placeholder_text="np. SNIPE-TRIAL-XXXX lub SNIPE-WEEK-XXXX",
+            height=38,
+            font=ctk.CTkFont(family="Consolas", size=13, weight="bold"),
+            fg_color="#150f2b",
+            border_color="#3c2666",
+            text_color="#f97316"
+        )
+        self.ent_key.pack(fill="x", pady=(0, 8))
+        if saved_key:
+            self.ent_key.insert(0, saved_key)
+
+        # Status / Error Label
+        self.lbl_status = ctk.CTkLabel(
+            card,
+            text="",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#f87171",
+            wraplength=460,
+            justify="center"
+        )
+        self.lbl_status.pack(fill="x", padx=22, pady=(4, 8))
+
+        # Buttons
+        self.btn_submit = ctk.CTkButton(
+            card,
+            text="⚡ ZALOGUJ I URUCHOM PROGRAM →",
+            height=44,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#f97316",
+            hover_color="#ea580c",
+            command=self._submit
+        )
+        self.btn_submit.pack(fill="x", padx=22, pady=(0, 8))
+
+        portal_url = self.auth_engine.auth_server_url
+        ctk.CTkButton(
+            card,
+            text="🌐 Otwórz Portal / Zdobądź Klucz (grdzsnipe.com)",
+            height=34,
+            font=ctk.CTkFont(size=12),
+            fg_color="transparent",
+            border_width=1,
+            border_color="#3c2666",
+            hover_color="#1e1b4b",
+            text_color="#a78bfa",
+            command=lambda: webbrowser.open(portal_url)
+        ).pack(fill="x", padx=22)
+
+    def _submit(self):
+        ident = self.ent_identity.get().strip()
+        pwd = self.ent_password.get().strip()
+        key = self.ent_key.get().strip()
+
+        if not ident:
+            self.lbl_status.configure(text="Podaj login lub adres e-mail do konta.", text_color="#f87171")
+            self.ent_identity.focus()
+            return
+        if not pwd:
+            self.lbl_status.configure(text="Podaj hasło do swojego konta.", text_color="#f87171")
+            self.ent_password.focus()
+            return
+        if not key:
+            self.lbl_status.configure(text="Wprowadź klucz licencyjny.", text_color="#f87171")
+            self.ent_key.focus()
+            return
+
+        self.btn_submit.configure(state="disabled", text="⏳ Weryfikacja tożsamości i licencji...")
+        self.lbl_status.configure(text="Łączenie z serwerem autoryzacji...", text_color="#38bdf8")
+
+        def _worker():
+            res = self.auth_engine.authenticate_user(ident, pwd, key)
+            self.after(0, lambda: self._on_result(res, ident, key))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_result(self, res: Any, ident: str, key: str):
+        if res.success:
+            self.lbl_status.configure(text="✓ Autoryzacja udana! Uruchamianie snajpera...", text_color="#34d399")
+            # Zapisujemy klucz i login w configu
+            self.cfg["user_login"] = ident
+            self.cfg["license_key"] = key
+            try:
+                with open(self.cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(self.cfg, f, indent=4, ensure_ascii=False)
+            except Exception:
+                pass
+
+            self.authenticated = True
+            self.after(300, self.destroy)
+        else:
+            self.btn_submit.configure(state="normal", text="⚡ ZALOGUJ I URUCHOM PROGRAM →")
+            status_text = res.message or "Błąd autoryzacji."
+            if "BAN" in status_text.upper() or res.status == "banned":
+                status_text = f"⛔ ODMOWA DOSTĘPU (BAN):\n{status_text}"
+            self.lbl_status.configure(text=status_text, text_color="#ef4444")
+
+
+def run_app():
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+
+    launcher = CyberAuthLauncher()
+    launcher.mainloop()
+
+    if launcher.authenticated:
+        app = DealTrackerApp()
+        app.mainloop()
+
+
 if __name__ == "__main__":
-    app = DealTrackerApp()
-    app.mainloop()
+    run_app()

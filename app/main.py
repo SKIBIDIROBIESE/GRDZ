@@ -4,11 +4,10 @@
 Glowny punkt wejsciowy aplikacji GPU Deal Sniper.
 """
 
-from gui import DealTrackerApp
+from gui import run_app
 
 def main():
-    app = DealTrackerApp()
-    app.mainloop()
+    run_app()
 
 if __name__ == "__main__":
     main()
