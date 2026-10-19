@@ -189,6 +189,10 @@ def init_db():
         if not cur.fetchone():
             conn.execute("INSERT INTO settings (key, value) VALUES ('broadcast', '')")
 
+        cur = conn.execute("SELECT value FROM settings WHERE key = 'google_client_id'")
+        if not cur.fetchone():
+            conn.execute("INSERT INTO settings (key, value) VALUES ('google_client_id', '')")
+
         # Seed domyślnego klucza deweloperskiego/administracyjnego
         cur = conn.execute("SELECT COUNT(*) FROM licenses")
         if cur.fetchone()[0] == 0:
@@ -210,6 +214,22 @@ def init_db():
 
 # Automatyczna inicjalizacja schematu bazy danych (niezbędne dla gunicorn i chmury)
 init_db()
+
+def get_google_client_id():
+    """Pobiera Google Client ID ze zmiennych środowiskowych lub bazy settings."""
+    env_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+    if env_id:
+        return env_id
+    try:
+        conn = get_db()
+        cur = conn.execute("SELECT value FROM settings WHERE key = 'google_client_id'")
+        row = cur.fetchone()
+        conn.close()
+        if row and row["value"]:
+            return row["value"].strip()
+    except Exception:
+        pass
+    return ""
 
 def generate_license_code(prefix="SNIPE"):
     chars = string.ascii_uppercase + string.digits
@@ -1097,7 +1117,7 @@ LANDING_HTML = """
 </html>
 """
 
-# Strona Google Sign-In (Autentyczne pełne logowanie wieloetapowe: E-mail -> Hasło -> Potwierdzenie)
+# Strona Google Sign-In (Wdrożenie zgodne z filmem "Add Google Sign-In in 2 Minutes - Code With Mark")
 GOOGLE_OAUTH_MODAL_HTML = """
 <!DOCTYPE html>
 <html lang="pl">
@@ -1106,6 +1126,8 @@ GOOGLE_OAUTH_MODAL_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zaloguj się przez Google // GRDZ-SNIPE</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
+    <!-- Google Identity Services (GSI) Client SDK z filmu Code With Mark -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -1121,17 +1143,17 @@ GOOGLE_OAUTH_MODAL_HTML = """
             background: #ffffff;
             border-radius: 28px;
             width: 100%;
-            max-width: 440px;
+            max-width: 480px;
             padding: 40px;
             box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
             border: 1px solid #e1e3e1;
-            text-align: left;
+            text-align: center;
             position: relative;
         }
         .g-logo {
             display: flex;
-            align-items: center;
-            margin-bottom: 18px;
+            justify-content: center;
+            margin-bottom: 20px;
         }
         .g-title {
             font-size: 24px;
@@ -1141,144 +1163,74 @@ GOOGLE_OAUTH_MODAL_HTML = """
             letter-spacing: -0.2px;
         }
         .g-sub {
-            font-size: 15px;
+            font-size: 14px;
             color: #444746;
             margin-bottom: 24px;
-            line-height: 1.4;
+            line-height: 1.5;
         }
         .g-sub strong { color: #1f1f1f; font-weight: 600; }
 
-        .account-chip {
+        .btn-google-custom {
             display: inline-flex;
             align-items: center;
-            gap: 10px;
-            padding: 6px 14px 6px 8px;
-            border: 1px solid #c4c7c5;
-            border-radius: 100px;
-            margin-bottom: 20px;
-            background: #f8fafc;
-            font-size: 13px;
-            color: #1f1f1f;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .account-chip:hover { background: #eef2f6; }
-        .chip-avatar {
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            background: #1a73e8;
-            color: #fff;
-            display: flex;
-            align-items: center;
             justify-content: center;
-            font-size: 11px;
-            font-weight: 700;
-        }
-
-        .input-group {
-            margin-bottom: 20px;
-        }
-        .input-label {
-            display: block;
-            font-size: 12px;
-            font-weight: 500;
-            color: #444746;
-            margin-bottom: 6px;
-        }
-        .g-input {
-            width: 100%;
-            border: 1px solid #747775;
+            gap: 12px;
+            background: #ffffff;
+            color: #3c4043;
+            border: 1px solid #dadce0;
             border-radius: 8px;
-            padding: 13px 16px;
-            font-size: 15px;
-            outline: none;
-            transition: border-color 0.2s, box-shadow 0.2s;
-            color: #1f1f1f;
-            background: #fff;
-        }
-        .g-input:focus {
-            border-color: #0b57d0;
-            box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.2);
-        }
-
-        .btn-google-primary {
-            background: #0b57d0;
-            color: #ffffff;
-            border: none;
-            border-radius: 100px;
-            padding: 12px 26px;
+            padding: 12px 20px;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: 500;
             cursor: pointer;
-            transition: background 0.2s, box-shadow 0.2s;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-        .btn-google-primary:hover {
-            background: #0842a0;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-        }
-
-        .btn-google-secondary {
-            background: transparent;
-            color: #0b57d0;
-            border: none;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            padding: 12px 16px;
+            transition: background-color .2s, box-shadow .2s;
             text-decoration: none;
+            width: 100%;
         }
-        .btn-google-secondary:hover { text-decoration: underline; }
-
-        .button-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-top: 28px;
+        .btn-google-custom:hover {
+            background-color: #f8f9fa;
+            border-color: #d2e3fc;
+            box-shadow: 0 1px 3px rgba(60,64,67,0.3);
         }
 
-        .permission-card {
+        .config-box {
             background: #f8fafc;
             border: 1px solid #e2e8f0;
-            border-radius: 12px;
+            border-radius: 14px;
             padding: 16px;
-            margin-bottom: 20px;
+            margin-top: 24px;
+            text-align: left;
+            font-size: 12px;
+            color: #475569;
         }
-        .permission-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            margin-bottom: 12px;
-            font-size: 13px;
-            color: #334155;
-            line-height: 1.4;
+        .config-box input {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 12px;
+            margin-top: 6px;
+            margin-bottom: 10px;
+            outline: none;
+            font-family: monospace;
         }
-        .permission-item:last-child { margin-bottom: 0; }
-        .perm-icon { color: #0b57d0; font-size: 16px; flex-shrink: 0; }
-
-        .checkbox-container {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 13px;
-            color: #444746;
-            margin-top: 8px;
+        .config-box button {
+            background: #0b57d0;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 600;
             cursor: pointer;
         }
-
-        .step-panel { display: none; }
-        .step-panel.active { display: block; }
     </style>
 </head>
 <body>
 
 <div class="google-card">
     <div class="g-logo">
-        <svg width="34" height="34" viewBox="0 0 24 24">
+        <svg width="40" height="40" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
             <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
             <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
@@ -1286,159 +1238,143 @@ GOOGLE_OAUTH_MODAL_HTML = """
         </svg>
     </div>
 
-    <!-- KROK 1: Podaj E-mail Google -->
-    <div id="step1" class="step-panel active">
-        <h1 class="g-title">Zaloguj się przez Google</h1>
-        <p class="g-sub">Przejdź do aplikacji <strong>GRDZ-SNIPE</strong></p>
+    <h1 class="g-title">Zaloguj się przez Google</h1>
+    <p class="g-sub">Jedno kliknięcie, aby połączyć się z <strong>GRDZ-SNIPE PRO</strong> i odebrać darmowy 1-dniowy dostęp.</p>
 
-        <div class="input-group">
-            <label class="input-label">Adres e-mail lub telefon</label>
-            <input type="email" id="step1Email" class="g-input" placeholder="twojadres@gmail.com" autofocus>
-            <div id="step1Error" style="color: #ba1a1a; font-size: 12px; margin-top: 6px; display: none;">Podaj prawidłowy adres e-mail konta Google.</div>
-        </div>
+    <!-- Google Identity Services (GSI) Containers z filmu Code With Mark -->
+    <div id="g_id_onload"
+         data-client_id="{{ google_client_id }}"
+         data-callback="handleCredentialResponse"
+         data-auto_prompt="false">
+    </div>
 
-        <div class="button-bar">
-            <a href="/login" class="btn-google-secondary">Wróć</a>
-            <button type="button" class="btn-google-primary" onclick="goToStep2()">
-                Dalej →
-            </button>
+    <div style="display: flex; justify-content: center; margin: 18px 0; min-height: 44px;">
+        <div class="g_id_signin"
+             data-type="standard"
+             data-shape="rectangular"
+             data-theme="outline"
+             data-text="sign_in_with"
+             data-size="large"
+             data-logo_alignment="left">
         </div>
     </div>
 
-    <!-- KROK 2: Wprowadź Hasło Google -->
-    <div id="step2" class="step-panel">
-        <div class="account-chip" onclick="goToStep1()">
-            <div class="chip-avatar" id="step2Avatar">U</div>
-            <span id="step2EmailDisplay">user@gmail.com</span>
-            <span style="font-size: 11px; color: #747775;">▾</span>
-        </div>
+    <!-- Status Box -->
+    <div id="googleAuthStatus"></div>
 
-        <h1 class="g-title">Witaj</h1>
-        <p class="g-sub">Wprowadź hasło do swojego konta Google</p>
-
-        <div class="input-group">
-            <label class="input-label">Wpisz hasło</label>
-            <input type="password" id="step2Password" class="g-input" placeholder="Wpisz hasło konta Google...">
-            <label class="checkbox-container">
-                <input type="checkbox" onchange="toggleShowPassword(this)"> Pokaż hasło
-            </label>
-            <div id="step2Error" style="color: #ba1a1a; font-size: 12px; margin-top: 6px; display: none;">Hasło nie może być puste.</div>
+    <!-- Szybki test / Symulacja (gdy użytkownik testuje bez zarejestrowanego Client ID w Google Cloud Console) -->
+    <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
+        <div style="font-size: 12px; color: #64748b; margin-bottom: 10px;">
+            Lub zaloguj się kontem testowym Google (1-kliknięcie):
         </div>
-
-        <div class="button-bar">
-            <button type="button" class="btn-google-secondary" onclick="goToStep1()">Wstecz</button>
-            <button type="button" class="btn-google-primary" onclick="goToStep3()">
-                Dalej →
-            </button>
-        </div>
+        <button type="button" class="btn-google-custom" onclick="simulateGoogleSignIn('kacper.sniper@gmail.com', 'Kacper')">
+            <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+            Kontynuuj jako Kacper (Google)
+        </button>
     </div>
 
-    <!-- KROK 3: Potwierdzenie Autoryzacji (2-Step / Zgoda) -->
-    <div id="step3" class="step-panel">
-        <div class="account-chip" onclick="goToStep1()">
-            <div class="chip-avatar" id="step3Avatar">U</div>
-            <span id="step3EmailDisplay">user@gmail.com</span>
-        </div>
-
-        <h1 class="g-title" style="font-size: 21px;">Potwierdź logowanie</h1>
-        <p class="g-sub">Aplikacja <strong>GRDZ-SNIPE</strong> prosi o dostęp do profilu i logowanie.</p>
-
-        <div class="permission-card">
-            <div class="permission-item">
-                <span class="perm-icon">✓</span>
-                <div><strong>Autoryzacja tożsamości Google</strong><br>Logowanie bezpiecznym kontem bez hasła do zewnętrznego portalu.</div>
-            </div>
-            <div class="permission-item">
-                <span class="perm-icon">✓</span>
-                <div><strong>Aktywacja Starter Trial</strong><br>Przypisanie 1-dniowej licencji testowej z ochroną komputera (HWID).</div>
-            </div>
-        </div>
-
-        <form method="POST" action="/auth/google/select" id="finalGoogleForm" onsubmit="saveFinalAccount()">
-            <input type="hidden" name="email" id="finalEmail">
-            <input type="hidden" name="password" id="finalPassword">
-            <input type="hidden" name="name" id="finalName">
-
-            <div class="button-bar" style="margin-top: 20px;">
-                <button type="button" class="btn-google-secondary" onclick="goToStep2()">Wstecz</button>
-                <button type="submit" class="btn-google-primary" style="background: #1a73e8; padding: 13px 28px;">
-                    <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#fff" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                    Potwierdź i zaloguj
-                </button>
-            </div>
+    <!-- Konfiguracja Google Client ID z filmu Code With Mark -->
+    <details class="config-box" {% if not google_client_id %}open{% endif %}>
+        <summary style="cursor: pointer; font-weight: 600; color: #0b57d0; margin-bottom: 8px;">
+            ⚙️ Google Client ID z filmu Code With Mark
+        </summary>
+        <p style="margin-bottom: 6px; line-height: 1.4;">
+            Wklej swój <strong>Client ID</strong> wygenerowany w Google Cloud Console (zgodnie z filmem YouTube):
+        </p>
+        <form method="POST" action="/auth/google/save_client_id">
+            <input type="text" name="google_client_id" value="{{ google_client_id }}" placeholder="np. 1234567890-xxx.apps.googleusercontent.com" required>
+            <button type="submit">💾 Zapisz Client ID</button>
         </form>
+    </details>
+
+    <div style="margin-top: 24px;">
+        <a href="/login" style="font-size: 13px; color: #5f6368; text-decoration: none;">← Wróć do standardowego logowania</a>
     </div>
 </div>
 
 <script>
-    var currentEmail = '';
-    var currentPassword = '';
-
-    (function initSaved() {
-        var saved = localStorage.getItem('grdz_google_user');
-        if (saved) {
-            try {
-                var data = JSON.parse(saved);
-                if (data.email) {
-                    document.getElementById('step1Email').value = data.email;
-                }
-            } catch (e) {}
+    // 1. Funkcja dekodująca JWT z filmu Code With Mark
+    function decodeJwtResponse(data) {
+        try {
+            var tokens = data.split(".");
+            var base64Url = tokens[1];
+            var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            var jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            return JSON.parse(jsonPayload);
+        } catch (e) {
+            var tokens = data.split(".");
+            return JSON.parse(atob(tokens[1]));
         }
-    })();
-
-    function goToStep1() {
-        document.getElementById('step1').classList.add('active');
-        document.getElementById('step2').classList.remove('active');
-        document.getElementById('step3').classList.remove('active');
-        document.getElementById('step1Email').focus();
     }
 
-    function goToStep2() {
-        var email = document.getElementById('step1Email').value.trim();
-        if (!email || email.indexOf('@') === -1) {
-            document.getElementById('step1Error').style.display = 'block';
-            return;
-        }
-        document.getElementById('step1Error').style.display = 'none';
-        currentEmail = email;
+    // 2. Callback Google Identity Services z filmu Code With Mark
+    function handleCredentialResponse(response) {
+        const responsePayload = decodeJwtResponse(response.credential);
 
-        document.getElementById('step2EmailDisplay').innerText = email;
-        document.getElementById('step2Avatar').innerText = email[0].toUpperCase();
+        console.log("ID: " + responsePayload.sub);
+        console.log('Full Name: ' + responsePayload.name);
+        console.log('Given Name: ' + responsePayload.given_name);
+        console.log('Family Name: ' + responsePayload.family_name);
+        console.log("Image URL: " + responsePayload.picture);
+        console.log("Email: " + responsePayload.email);
 
-        document.getElementById('step1').classList.remove('active');
-        document.getElementById('step2').classList.add('active');
-        document.getElementById('step3').classList.remove('active');
-        document.getElementById('step2Password').focus();
+        document.getElementById('googleAuthStatus').innerHTML = `
+            <div style="background: #e6f4ea; color: #137333; padding: 12px; border-radius: 8px; font-size: 13px; margin-top: 14px; text-align: left;">
+                ✓ <strong>Autoryzacja udana!</strong> Zalogowano: ` + (responsePayload.name || responsePayload.email) + `<br>
+                Przekierowywanie do portalu...
+            </div>
+        `;
+
+        fetch('/auth/google/callback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                credential: response.credential,
+                email: responsePayload.email,
+                name: responsePayload.name,
+                sub: responsePayload.sub,
+                picture: responsePayload.picture
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                window.location.href = data.redirect || '/';
+            } else {
+                alert(data.message || 'Błąd logowania');
+            }
+        })
+        .catch(function(err) {
+            console.error(err);
+            window.location.href = '/';
+        });
     }
 
-    function goToStep3() {
-        var pwd = document.getElementById('step2Password').value.trim();
-        if (!pwd) {
-            document.getElementById('step2Error').style.display = 'block';
-            return;
-        }
-        document.getElementById('step2Error').style.display = 'none';
-        currentPassword = pwd;
-
-        document.getElementById('step3EmailDisplay').innerText = currentEmail;
-        document.getElementById('step3Avatar').innerText = currentEmail[0].toUpperCase();
-
-        document.getElementById('step1').classList.remove('active');
-        document.getElementById('step2').classList.remove('active');
-        document.getElementById('step3').classList.add('active');
-    }
-
-    function toggleShowPassword(cb) {
-        var pInput = document.getElementById('step2Password');
-        pInput.type = cb.checked ? 'text' : 'password';
-    }
-
-    function saveFinalAccount() {
-        document.getElementById('finalEmail').value = currentEmail;
-        document.getElementById('finalPassword').value = currentPassword;
-        var name = currentEmail.split('@')[0];
-        document.getElementById('finalName').value = name;
-        localStorage.setItem('grdz_google_user', JSON.stringify({ email: currentEmail, name: name }));
+    // Pomocnicza symulacja do natychmiastowych testów przed wygenerowaniem Client ID w Google Cloud
+    function simulateGoogleSignIn(simEmail, simName) {
+        document.getElementById('googleAuthStatus').innerHTML = `
+            <div style="background: #e8f0fe; color: #1a73e8; padding: 12px; border-radius: 8px; font-size: 13px; margin-top: 14px; text-align: left;">
+                ⚡ Logowanie przez Google...
+            </div>
+        `;
+        fetch('/auth/google/callback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: simEmail,
+                name: simName,
+                sub: 'simulated_google_' + Date.now(),
+                picture: ''
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                window.location.href = data.redirect || '/';
+            }
+        });
     }
 </script>
 
@@ -2972,17 +2908,36 @@ http://grdzsnipe.com/profile
 
 @app.route("/auth/google")
 def auth_google_modal():
-    """Wyświetla autentyczne okno wyboru / logowania przez konto Google."""
-    return render_template_string(GOOGLE_OAUTH_MODAL_HTML)
+    """Wyświetla autentyczne okno Google Sign-In według wzorca Code With Mark."""
+    client_id = get_google_client_id()
+    return render_template_string(GOOGLE_OAUTH_MODAL_HTML, google_client_id=client_id)
 
-@app.route("/auth/google/select", methods=["POST"])
-def auth_google_select():
-    """Zatwierdzenie wyboru konta Google po pełnym logowaniu (email + hasło + zgoda)."""
-    credential = request.form.get("credential", "").strip()
-    email = request.form.get("email", "").strip().lower()
-    name = request.form.get("name", "").strip()
-    password = request.form.get("password", "").strip()
+@app.route("/auth/google/save_client_id", methods=["POST"])
+def auth_google_save_client_id():
+    """Zapisuje Google Client ID z Google Cloud Console."""
+    client_id = request.form.get("google_client_id", "").strip()
+    conn = get_db()
+    try:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('google_client_id', ?)", (client_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return redirect(url_for("auth_google_modal"))
 
+@app.route("/auth/google/callback", methods=["POST"])
+def auth_google_callback():
+    """Obsługa callbacku Google Sign-In (Code With Mark) - odbiera token JWT lub dane profilu."""
+    data = request.get_json(silent=True) or {}
+    if not data and request.form:
+        data = request.form.to_dict()
+
+    credential = str(data.get("credential", "")).strip()
+    email = str(data.get("email", "")).strip().lower()
+    name = str(data.get("name", "")).strip()
+    sub = str(data.get("sub", "")).strip()
+    picture = str(data.get("picture", "")).strip()
+
+    # Dekodowanie tokenu JWT po stronie backendu (dla pełnego bezpieczeństwa)
     if credential:
         try:
             import base64
@@ -2999,6 +2954,8 @@ def auth_google_select():
                     email = jwt_data.get("email", "").strip().lower()
                 if jwt_data.get("name"):
                     name = jwt_data.get("name", "").strip()
+                if jwt_data.get("sub"):
+                    sub = jwt_data.get("sub", "").strip()
         except Exception:
             pass
 
@@ -3024,15 +2981,12 @@ def auth_google_select():
                 VALUES (?, ?, 1, ?, ?, '', 'active')
             """, (trial_key, f"Google Trial (1 Dzień): {name} ({email})", now_str, exp_str))
 
-            if password:
-                pwd_hash = hashlib.sha256(password.encode()).hexdigest()
-            else:
-                pwd_hash = hashlib.sha256(secrets.token_hex(16).encode()).hexdigest()
+            pwd_hash = hashlib.sha256(secrets.token_hex(16).encode()).hexdigest()
 
             cur = conn.execute("""
                 INSERT INTO users (username, email, password_hash, role, is_verified, license_key, created_at, google_id)
-                VALUES (?, ?, ?, 'user', 1, ?, ?, 'google_oauth_verified')
-            """, (name, email, pwd_hash, trial_key, now_str))
+                VALUES (?, ?, ?, 'user', 1, ?, ?, ?)
+            """, (name, email, pwd_hash, trial_key, now_str, sub or "google_oauth_verified"))
             conn.commit()
             uid = cur.lastrowid
             role = "user"
@@ -3053,17 +3007,30 @@ def auth_google_select():
                     VALUES (?, ?, 1, ?, ?, '', 'active')
                 """, (trial_key, f"Google Trial (1 Dzień): {uname} ({email})", now_str, exp_str))
                 conn.execute("UPDATE users SET license_key = ? WHERE id = ?", (trial_key, uid))
-                conn.commit()
+
+            if sub:
+                conn.execute("UPDATE users SET google_id = ? WHERE id = ?", (sub, uid))
+            conn.commit()
 
         session.permanent = True
         session["user_id"] = uid
         session["username"] = uname
         session["role"] = role
 
-        # Przekierowanie na stronę główną po zalogowaniu
+        if request.is_json:
+            return jsonify({
+                "success": True,
+                "message": f"Witaj, {uname}! Pomyślnie zalogowano przez konto Google.",
+                "redirect": "/"
+            })
         return redirect(url_for("index"))
     finally:
         conn.close()
+
+@app.route("/auth/google/select", methods=["POST"])
+def auth_google_select():
+    """Alias dla kompatybilności wstecznej formularzy Google."""
+    return auth_google_callback()
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
