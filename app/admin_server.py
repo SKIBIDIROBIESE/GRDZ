@@ -3052,10 +3052,18 @@ def login():
             cur = conn.execute("SELECT * FROM users WHERE username = ? OR email = ?", (identity, identity))
             user = cur.fetchone()
             if user and hashlib.sha256(pwd.encode()).hexdigest() == user["password_hash"]:
+                # Logowanie na konto administratora nie wymaga weryfikacji kodem (natychmiastowe logowanie)
+                if user["role"] == "admin" or user["username"] == "admin":
+                    session.permanent = True
+                    session["user_id"] = user["id"]
+                    session["username"] = user["username"]
+                    session["role"] = user["role"]
+                    return redirect(url_for("admin_dashboard"))
+
                 if not user["is_verified"] and user["role"] != "admin":
                     return redirect(url_for("verify_email", email=user["email"]))
 
-                # Zwykłe logowanie przez dane wymaga potwierdzenia kodem na mailu (2FA)
+                # Zwykłe logowanie przez dane użytkownika wymaga potwierdzenia kodem na mailu (2FA)
                 code = f"{secrets.randbelow(900000) + 100000}"
                 conn.execute("UPDATE users SET verification_code = ? WHERE id = ?", (code, user["id"]))
                 conn.commit()
