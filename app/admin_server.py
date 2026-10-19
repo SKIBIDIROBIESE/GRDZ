@@ -321,7 +321,7 @@ def api_client_auth_login():
                 }), 403
 
         # 3. Weryfikacja konta użytkownika (Login + Hasło)
-        cur = conn.execute("SELECT * FROM users WHERE username = ? OR email = ?", (identity, identity.lower()))
+        cur = conn.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)", (identity, identity))
         user = cur.fetchone()
         if not user:
             return jsonify({
@@ -331,7 +331,17 @@ def api_client_auth_login():
             }), 401
 
         pwd_hash = hashlib.sha256(pwd.encode()).hexdigest()
-        if pwd_hash != user["password_hash"]:
+        cur_admin_setting = conn.execute("SELECT value FROM settings WHERE key = 'admin_password_hash'")
+        admin_set_row = cur_admin_setting.fetchone()
+        admin_set_hash = admin_set_row["value"] if admin_set_row else ""
+
+        password_matches = (pwd_hash == user["password_hash"])
+        if not password_matches and (user["role"] == "admin" or user["username"] == "admin") and pwd_hash == admin_set_hash:
+            password_matches = True
+            conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pwd_hash, user["id"]))
+            conn.commit()
+
+        if not password_matches:
             return jsonify({
                 "success": False,
                 "status": "invalid_credentials",
@@ -1978,14 +1988,25 @@ SETTINGS_HTML = """
         <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px;">Używaj bezpiecznego, unikalnego hasła o długości min. 6 znaków.</p>
 
         <form method="POST" action="/settings/change_password" style="max-width: 440px;">
+            {% if user.role != 'admin' %}
             <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; display: block; font-weight: 600;">Aktualne Hasło</label>
-            <input type="password" name="current_password" class="form-input" placeholder="Wpisz aktualne hasło..." required>
+            <input type="password" id="currPwdInput" name="current_password" class="form-input" placeholder="Wpisz aktualne hasło..." required>
+            {% else %}
+            <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; display: block; font-weight: 600;">Aktualne Hasło <span style="color: var(--text-muted); font-weight: 400;">(opcjonalne dla administratora)</span></label>
+            <input type="password" id="currPwdInput" name="current_password" class="form-input" placeholder="Wpisz obecne hasło lub zostaw puste...">
+            {% endif %}
 
             <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; display: block; font-weight: 600;">Nowe Hasło</label>
-            <input type="password" name="new_password" class="form-input" placeholder="Minimum 6 znaków..." required>
+            <input type="password" id="newPwdInput" name="new_password" class="form-input" placeholder="Minimum 6 znaków..." required>
 
             <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; display: block; font-weight: 600;">Powtórz Nowe Hasło</label>
-            <input type="password" name="confirm_password" class="form-input" placeholder="Powtórz nowe hasło..." required>
+            <input type="password" id="confirmPwdInput" name="confirm_password" class="form-input" placeholder="Powtórz nowe hasło..." required>
+
+            <div style="margin-bottom: 16px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
+                    <input type="checkbox" onchange="toggleSettingsPwdVis(this)"> Pokaż wpisywane hasło
+                </label>
+            </div>
 
             <button type="submit" class="btn btn-primary">Zapisz Nowe Hasło</button>
         </form>
@@ -2008,6 +2029,18 @@ SETTINGS_HTML = """
         </div>
     </div>
 </div>
+
+<script>
+function toggleSettingsPwdVis(cb) {
+    const t = cb.checked ? 'text' : 'password';
+    var c = document.getElementById('currPwdInput');
+    if (c) c.type = t;
+    var n = document.getElementById('newPwdInput');
+    if (n) n.type = t;
+    var cf = document.getElementById('confirmPwdInput');
+    if (cf) cf.type = t;
+}
+</script>
 
 </body>
 </html>
@@ -2209,6 +2242,7 @@ ADMIN_HTML_TEMPLATE = """
     <div class="nav-links">
         <a href="/" class="btn btn-outline btn-sm">🏠 Strona Główna</a>
         <a href="/settings" class="btn btn-outline btn-sm">⚙️ Ustawienia</a>
+        <button class="btn btn-outline btn-sm" onclick="openAdminPasswordModal()">🔑 Zmień Hasło</button>
         <button class="btn btn-primary btn-sm" onclick="openCreateModal()">+ Nowy Klucz</button>
         <button class="btn btn-outline btn-sm" onclick="openBroadcastModal()">📢 Broadcast</button>
         <button class="btn btn-outline btn-sm" id="btnKillswitch" onclick="toggleKillswitch()">
@@ -2359,6 +2393,34 @@ ADMIN_HTML_TEMPLATE = """
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
             <button class="btn btn-outline" onclick="closeBroadcastModal()">Anuluj</button>
             <button class="btn btn-primary" onclick="submitBroadcast()">Rozgłoś Komunikat</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Zmiana Hasła Administratora -->
+<div class="modal-overlay" id="adminPasswordModal">
+    <div class="modal">
+        <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">🔑 Zmiana Hasła Administratora</h3>
+        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;">
+            Wprowadź nowe hasło dla konta <strong>admin</strong>. Zmiana zostanie natychmiast zapisana w bazie.
+        </p>
+        <div class="form-group">
+            <label class="form-label">Nowe Hasło</label>
+            <input type="password" id="adminNewPassword" class="form-input" placeholder="Minimum 6 znaków..." required>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Powtórz Nowe Hasło</label>
+            <input type="password" id="adminConfirmPassword" class="form-input" placeholder="Powtórz nowe hasło..." required>
+        </div>
+        <div style="margin-bottom: 16px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
+                <input type="checkbox" onchange="toggleAdminPasswordVis(this)"> Pokaż wpisywane hasło
+            </label>
+        </div>
+        <div id="adminPasswordMsg" style="margin-bottom: 16px; font-size: 12px; display: none;"></div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button class="btn btn-outline" onclick="closeAdminPasswordModal()">Anuluj</button>
+            <button class="btn btn-primary" onclick="submitAdminPasswordChange()">Zapisz Nowe Hasło</button>
         </div>
     </div>
 </div>
@@ -2626,6 +2688,60 @@ ADMIN_HTML_TEMPLATE = """
         fetchData();
     }
 
+    function openAdminPasswordModal() {
+        document.getElementById('adminPasswordModal').style.display = 'flex';
+        document.getElementById('adminNewPassword').value = '';
+        document.getElementById('adminConfirmPassword').value = '';
+        document.getElementById('adminPasswordMsg').style.display = 'none';
+        document.getElementById('adminNewPassword').focus();
+    }
+
+    function closeAdminPasswordModal() {
+        document.getElementById('adminPasswordModal').style.display = 'none';
+    }
+
+    function toggleAdminPasswordVis(cb) {
+        const t = cb.checked ? 'text' : 'password';
+        document.getElementById('adminNewPassword').type = t;
+        document.getElementById('adminConfirmPassword').type = t;
+    }
+
+    async function submitAdminPasswordChange() {
+        const p1 = document.getElementById('adminNewPassword').value.trim();
+        const p2 = document.getElementById('adminConfirmPassword').value.trim();
+        const msg = document.getElementById('adminPasswordMsg');
+        if (p1.length < 6) {
+            msg.style.display = 'block';
+            msg.style.color = '#fca5a5';
+            msg.innerText = 'Nowe hasło musi mieć minimum 6 znaków.';
+            return;
+        }
+        if (p1 !== p2) {
+            msg.style.display = 'block';
+            msg.style.color = '#fca5a5';
+            msg.innerText = 'Wpisane hasła nie są identyczne.';
+            return;
+        }
+        try {
+            const res = await fetch('/api/admin/change_password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_password: p1 })
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert('✓ ' + data.message);
+                closeAdminPasswordModal();
+            } else {
+                msg.style.display = 'block';
+                msg.style.color = '#fca5a5';
+                msg.innerText = data.message || 'Błąd zapisu hasła.';
+            }
+        } catch (e) {
+            alert('Błąd połączenia z serwerem');
+        }
+    }
+
     function copyToClipboard(text) {
         navigator.clipboard.writeText(text);
         alert('Skopiowano do schowka: ' + text);
@@ -2825,19 +2941,56 @@ def settings_change_password():
     if new_pwd != confirm_pwd:
         return redirect(url_for("settings_page", error="Nowe hasła nie są identyczne."))
 
+    is_admin = (session.get("role") == "admin" or session.get("username") == "admin")
+
     conn = get_db()
     try:
         cur = conn.execute("SELECT password_hash FROM users WHERE id = ?", (session["user_id"],))
         row = cur.fetchone()
-        if not row or hashlib.sha256(curr_pwd.encode()).hexdigest() != row["password_hash"]:
-            return redirect(url_for("settings_page", error="Aktualne hasło jest niepoprawne."))
+
+        if not is_admin:
+            if not row or hashlib.sha256(curr_pwd.encode()).hexdigest() != row["password_hash"]:
+                return redirect(url_for("settings_page", error="Aktualne hasło jest niepoprawne."))
+        else:
+            # Dla administratora: jeśli podano obecne hasło, sprawdź czy pasuje do users lub admin_password_hash
+            if curr_pwd:
+                cur_s = conn.execute("SELECT value FROM settings WHERE key = 'admin_password_hash'")
+                set_row = cur_s.fetchone()
+                set_hash = set_row["value"] if set_row else ""
+                entered_hash = hashlib.sha256(curr_pwd.encode()).hexdigest()
+                row_hash = row["password_hash"] if row else ""
+                if entered_hash != row_hash and entered_hash != set_hash:
+                    return redirect(url_for("settings_page", error="Wprowadzone aktualne hasło jest niepoprawne."))
 
         new_hash = hashlib.sha256(new_pwd.encode()).hexdigest()
         conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, session["user_id"]))
-        if session.get("role") == "admin":
-            conn.execute("UPDATE settings SET value = ? WHERE key = 'admin_password_hash'", (new_hash,))
+        if is_admin:
+            conn.execute("UPDATE users SET password_hash = ? WHERE username = 'admin'", (new_hash,))
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('admin_password_hash', ?)", (new_hash,))
         conn.commit()
-        return redirect(url_for("settings_page", success="Hasło zostało pomyślnie zaktualizowane."))
+        return redirect(url_for("settings_page", success="Hasło zostało pomyślnie zaktualizowane! Nowe hasło jest aktywne."))
+    finally:
+        conn.close()
+
+@app.route("/api/admin/change_password", methods=["POST"])
+@admin_required
+def api_admin_change_password():
+    data = request.get_json(silent=True) or {}
+    if not data and request.form:
+        data = request.form.to_dict()
+    new_pwd = str(data.get("new_password", "")).strip()
+    if len(new_pwd) < 6:
+        return jsonify({"success": False, "message": "Nowe hasło musi mieć minimum 6 znaków."}), 400
+
+    new_hash = hashlib.sha256(new_pwd.encode()).hexdigest()
+    conn = get_db()
+    try:
+        conn.execute("UPDATE users SET password_hash = ? WHERE username = 'admin'", (new_hash,))
+        if session.get("user_id"):
+            conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, session["user_id"]))
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('admin_password_hash', ?)", (new_hash,))
+        conn.commit()
+        return jsonify({"success": True, "message": "Hasło administratora zostało pomyślnie zmienione! Możesz się teraz logować nowym hasłem."})
     finally:
         conn.close()
 
@@ -3049,9 +3202,24 @@ def login():
 
         conn = get_db()
         try:
-            cur = conn.execute("SELECT * FROM users WHERE username = ? OR email = ?", (identity, identity))
+            cur = conn.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)", (identity, identity))
             user = cur.fetchone()
-            if user and hashlib.sha256(pwd.encode()).hexdigest() == user["password_hash"]:
+
+            cur_admin_setting = conn.execute("SELECT value FROM settings WHERE key = 'admin_password_hash'")
+            admin_set_row = cur_admin_setting.fetchone()
+            admin_set_hash = admin_set_row["value"] if admin_set_row else ""
+
+            pwd_hash = hashlib.sha256(pwd.encode()).hexdigest()
+            password_matches = False
+            if user:
+                if pwd_hash == user["password_hash"]:
+                    password_matches = True
+                elif (user["role"] == "admin" or user["username"] == "admin") and pwd_hash == admin_set_hash:
+                    password_matches = True
+                    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pwd_hash, user["id"]))
+                    conn.commit()
+
+            if user and password_matches:
                 # Logowanie na konto administratora nie wymaga weryfikacji kodem (natychmiastowe logowanie)
                 if user["role"] == "admin" or user["username"] == "admin":
                     session.permanent = True
