@@ -1319,29 +1319,24 @@ GOOGLE_OAUTH_MODAL_HTML = """
         }
     }
 
-    // 2. Callback Google Identity Services z filmu Code With Mark
+    // 2. Callback Google Identity Services z oficjalnej dokumentacji
     function handleCredentialResponse(response) {
+        console.log("Encoded JWT ID token: " + response.credential);
         const responsePayload = decodeJwtResponse(response.credential);
-
-        console.log("ID: " + responsePayload.sub);
-        console.log('Full Name: ' + responsePayload.name);
-        console.log('Given Name: ' + responsePayload.given_name);
-        console.log('Family Name: ' + responsePayload.family_name);
-        console.log("Image URL: " + responsePayload.picture);
-        console.log("Email: " + responsePayload.email);
 
         document.getElementById('googleAuthStatus').innerHTML = `
             <div style="background: #e6f4ea; color: #137333; padding: 12px; border-radius: 8px; font-size: 13px; margin-top: 14px; text-align: left;">
-                ✓ <strong>Autoryzacja udana!</strong> Zalogowano: ` + (responsePayload.name || responsePayload.email) + `<br>
+                ✓ <strong>Autoryzacja udana!</strong> Weryfikacja tokenu Google...<br>
                 Przekierowywanie do portalu...
             </div>
         `;
 
-        fetch('/auth/google/callback', {
+        // Send this token to your backend server to verify and log the user in
+        fetch('/auth/google', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                credential: response.credential,
+                token: response.credential,
                 email: responsePayload.email,
                 name: responsePayload.name,
                 sub: responsePayload.sub,
@@ -1353,7 +1348,7 @@ GOOGLE_OAUTH_MODAL_HTML = """
             if (data.success) {
                 window.location.href = data.redirect || '/';
             } else {
-                alert(data.message || 'Błąd logowania');
+                alert(data.message || 'Błąd logowania przez Google.');
             }
         })
         .catch(function(err) {
@@ -1369,14 +1364,14 @@ GOOGLE_OAUTH_MODAL_HTML = """
                 ⚡ Logowanie przez Google...
             </div>
         `;
-        fetch('/auth/google/callback', {
+        fetch('/auth/google', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 email: simEmail,
                 name: simName,
                 sub: 'simulated_google_' + Date.now(),
-                picture: ''
+                token: ''
             })
         })
         .then(function(r) { return r.json(); })
@@ -1450,6 +1445,8 @@ LOGIN_HTML = """
     <meta charset="UTF-8">
     <title>GRDZ-SNIPE // Logowanie</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet">
+    <!-- Google Identity Services (GSI) Script -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         """ + BASE_CSS + """
         body { align-items: center; justify-content: center; }
@@ -1472,11 +1469,22 @@ LOGIN_HTML = """
         </div>
     {% endif %}
 
-    <!-- Google Login Button -> otwiera autentyczne okno wyboru konta Google -->
+    <!-- Google Identity Services (GSI) Official Button -->
+    {% if google_client_id %}
+    <div id="g_id_onload"
+         data-client_id="{{ google_client_id }}"
+         data-callback="handleCredentialResponse"
+         data-auto_prompt="false">
+    </div>
+    <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+        <div class="g_id_signin" data-type="standard" data-shape="rectangular" data-theme="outline" data-text="sign_in_with" data-size="large" data-logo_alignment="left"></div>
+    </div>
+    {% else %}
     <a href="/auth/google" class="btn btn-google" style="width: 100%; margin-bottom: 20px;">
         <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
         Zaloguj przez Google
     </a>
+    {% endif %}
 
     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
         <div style="flex: 1; height: 1px; background: var(--border);"></div>
@@ -1499,6 +1507,29 @@ LOGIN_HTML = """
     </div>
 </div>
 
+<script>
+function handleCredentialResponse(response) {
+    console.log("Encoded JWT ID token: " + response.credential);
+    fetch('/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: response.credential })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.success) {
+            window.location.href = data.redirect || '/';
+        } else {
+            alert(data.message || 'Błąd logowania przez Google.');
+        }
+    })
+    .catch(function(err) {
+        console.error(err);
+        window.location.href = '/';
+    });
+}
+</script>
+
 </body>
 </html>
 """
@@ -1510,6 +1541,8 @@ REGISTER_HTML = """
     <meta charset="UTF-8">
     <title>GRDZ-SNIPE // Rejestracja Konta</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet">
+    <!-- Google Identity Services (GSI) Script -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         """ + BASE_CSS + """
         body { align-items: center; justify-content: center; }
@@ -1532,11 +1565,22 @@ REGISTER_HTML = """
         </div>
     {% endif %}
 
-    <!-- Google Register Button -> dedykowane okno Google -->
+    <!-- Oficjalny przycisk Google Identity Services (GSI) -->
+    {% if google_client_id %}
+    <div id="g_id_onload"
+         data-client_id="{{ google_client_id }}"
+         data-callback="handleCredentialResponse"
+         data-auto_prompt="false">
+    </div>
+    <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+        <div class="g_id_signin" data-type="standard" data-shape="rectangular" data-theme="outline" data-text="sign_in_with" data-size="large" data-logo_alignment="left"></div>
+    </div>
+    {% else %}
     <a href="/auth/google" class="btn btn-google" style="width: 100%; margin-bottom: 20px;">
         <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
         Zarejestruj przez Google
     </a>
+    {% endif %}
 
     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
         <div style="flex: 1; height: 1px; background: var(--border);"></div>
@@ -1561,6 +1605,29 @@ REGISTER_HTML = """
         Masz już konto? <a href="/login" style="color: var(--accent); text-decoration: none; font-weight: 700;">Zaloguj się</a>
     </div>
 </div>
+
+<script>
+function handleCredentialResponse(response) {
+    console.log("Encoded JWT ID token: " + response.credential);
+    fetch('/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: response.credential })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.success) {
+            window.location.href = data.redirect || '/';
+        } else {
+            alert(data.message || 'Błąd logowania przez Google.');
+        }
+    })
+    .catch(function(err) {
+        console.error(err);
+        window.location.href = '/';
+    });
+}
+</script>
 
 </body>
 </html>
@@ -3059,9 +3126,11 @@ http://grdzsnipe.com/profile
 # Authentication Routes (Google Modal, Login, Register)
 # ---------------------------------------------------------
 
-@app.route("/auth/google")
+@app.route("/auth/google", methods=["GET", "POST"])
 def auth_google_modal():
-    """Wyświetla autentyczne okno Google Sign-In według wzorca Code With Mark."""
+    """Obsługa Google Identity Services (GSI) - GET wyświetla okno, POST przyjmuje token logowania."""
+    if request.method == "POST":
+        return auth_google_callback()
     client_id = get_google_client_id()
     return render_template_string(GOOGLE_OAUTH_MODAL_HTML, google_client_id=client_id)
 
@@ -3079,12 +3148,12 @@ def auth_google_save_client_id():
 
 @app.route("/auth/google/callback", methods=["POST"])
 def auth_google_callback():
-    """Obsługa callbacku Google Sign-In (Code With Mark) - odbiera token JWT lub dane profilu."""
+    """Weryfikacja tokenu ID z Google Identity Services (GSI) i logowanie użytkownika."""
     data = request.get_json(silent=True) or {}
     if not data and request.form:
         data = request.form.to_dict()
 
-    credential = str(data.get("credential", "")).strip()
+    credential = str(data.get("token") or data.get("credential", "")).strip()
     email = str(data.get("email", "")).strip().lower()
     name = str(data.get("name", "")).strip()
     sub = str(data.get("sub", "")).strip()
@@ -3101,16 +3170,20 @@ def auth_google_callback():
                 rem = len(payload_b64) % 4
                 if rem > 0:
                     payload_b64 += "=" * (4 - rem)
-                payload_json = base64.urlsafe_b64decode(payload_b64).decode("utf-8", errors="ignore")
+                payload_json = base64.urlsafe_b64decode(payload_b64.encode("ascii")).decode("utf-8", errors="ignore")
                 jwt_data = json.loads(payload_json)
                 if jwt_data.get("email"):
                     email = jwt_data.get("email", "").strip().lower()
                 if jwt_data.get("name"):
                     name = jwt_data.get("name", "").strip()
+                elif jwt_data.get("given_name"):
+                    name = jwt_data.get("given_name", "").strip()
                 if jwt_data.get("sub"):
                     sub = jwt_data.get("sub", "").strip()
-        except Exception:
-            pass
+                if jwt_data.get("picture"):
+                    picture = jwt_data.get("picture", "").strip()
+        except Exception as e:
+            print("JWT decode error:", e)
 
     if not email or "@" not in email:
         email = f"user_{secrets.token_hex(3)}@gmail.com"
@@ -3244,7 +3317,7 @@ def login():
         finally:
             conn.close()
 
-    return render_template_string(LOGIN_HTML, error=error)
+    return render_template_string(LOGIN_HTML, error=error, google_client_id=get_google_client_id())
 
 @app.route("/login/2fa", methods=["GET", "POST"])
 def login_2fa():
@@ -3341,7 +3414,7 @@ def register():
             finally:
                 conn.close()
 
-    return render_template_string(REGISTER_HTML, error=error)
+    return render_template_string(REGISTER_HTML, error=error, google_client_id=get_google_client_id())
 
 @app.route("/verify-email", methods=["GET", "POST"])
 def verify_email():
