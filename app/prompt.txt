@@ -1,0 +1,1 @@
+dodaj opcję minimalnej kwoty, dodaj jeszcze strony takie jak allegro i allegro lokalnie, dodaj opcję szukania dokładnie tej frazy którą wpisuje
