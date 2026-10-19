@@ -146,6 +146,16 @@ def init_db():
             )
         """)
 
+        # Tabela blokady anty-multikonto per HWID (dokładnie 1 darmowy trial na 1 urządzenie)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS used_trials (
+                hwid TEXT PRIMARY KEY,
+                license_key TEXT NOT NULL,
+                claimed_at TEXT NOT NULL,
+                ip_address TEXT DEFAULT ''
+            )
+        """)
+
         # Domyślny administrator (login: admin, hasło: admin123)
         cur = conn.execute("SELECT id FROM users WHERE username = 'admin'")
         if not cur.fetchone():
@@ -304,6 +314,24 @@ def api_verify_license():
                 }), 403
         except Exception:
             pass
+
+        # Blokada anty-multikonto dla darmowego trialu (1 trial na dany komputer/HWID)
+        is_trial = key.startswith("SNIPE-TRIAL") or (lic["duration_days"] is not None and lic["duration_days"] <= 1)
+        if is_trial and hwid:
+            cur = conn.execute("SELECT * FROM used_trials WHERE hwid = ?", (hwid,))
+            trial_row = cur.fetchone()
+            if trial_row and trial_row["license_key"] != key:
+                return jsonify({
+                    "success": False,
+                    "valid": False,
+                    "status": "trial_already_used",
+                    "message": "Ten komputer (HWID) wykorzystał już darmowy 1-dniowy Trial na innym koncie. Aby kontynuować, wykup pakiet w Sklepie (od 19 zł)."
+                }), 403
+
+            # Zapisujemy wykorzystanie darmowego trialu dla tego HWID
+            conn.execute("INSERT OR REPLACE INTO used_trials (hwid, license_key, claimed_at, ip_address) VALUES (?, ?, ?, ?)",
+                         (hwid, key, now_dt.strftime("%Y-%m-%d %H:%M:%S"), ip_addr))
+            conn.commit()
 
         lic_hwid = lic["hwid"]
         if not lic_hwid:
@@ -830,7 +858,7 @@ LANDING_HTML = """
                 <a href="/shop" class="btn btn-primary" style="padding: 14px 28px; font-size: 15px;">⚡ Odbierz Trial w Sklepie →</a>
             {% endif %}
         {% else %}
-            <a href="/register" class="btn btn-primary" style="padding: 14px 28px; font-size: 15px;">Utwórz Konto i Odbierz 7-Dniowy Trial →</a>
+            <a href="/register" class="btn btn-primary" style="padding: 14px 28px; font-size: 15px;">Utwórz Konto i Odbierz 1-Dniowy Trial →</a>
             <a href="/auth/google" class="btn btn-google" style="padding: 14px 24px; font-size: 15px;">
                 <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
                 Zaloguj przez Google
@@ -1143,7 +1171,7 @@ REGISTER_HTML = """
         <div class="brand-logo">⚡</div>
         <div>
             <div class="brand-title">Utwórz Konto</div>
-            <div style="font-size: 11px; color: var(--accent); font-weight: 700;">DARMOWY 7-DNIOWY TRIAL</div>
+            <div style="font-size: 11px; color: var(--accent); font-weight: 700;">DARMOWY 1-DNIOWY TRIAL (1x na PC/HWID)</div>
         </div>
     </div>
 
@@ -1307,21 +1335,22 @@ SHOP_HTML = """
     <div class="pricing-grid">
         <!-- Starter Trial -->
         <div class="pricing-card">
+            <span class="badge badge-live" style="position: absolute; top: 16px; right: 16px;">1x na PC</span>
             <h3 style="font-size: 20px; font-weight: 700;">Starter Trial</h3>
-            <div style="font-size: 13px; color: var(--text-muted);">Pakiet na start dla każdego</div>
-            <div class="pricing-price" style="color: var(--cyan);">0 PLN <span style="font-size: 14px; color: var(--text-muted); font-weight: 500;">/ 7 dni</span></div>
+            <div style="font-size: 13px; color: var(--text-muted);">Darmowy test (max 1 na HWID)</div>
+            <div class="pricing-price" style="color: var(--cyan);">0 PLN <span style="font-size: 14px; color: var(--text-muted); font-weight: 500;">/ 1 dzień</span></div>
             <ul class="features-list">
-                <li><span style="color: var(--cyan);">✓</span> Pełny dostęp do OLX, Vinted, Allegro</li>
+                <li><span style="color: var(--cyan);">✓</span> 24h pełnego dostępu do OLX, Vinted, Allegro</li>
                 <li><span style="color: var(--cyan);">✓</span> AI Deal Evaluator (szybka analiza)</li>
-                <li><span style="color: var(--cyan);">✓</span> Odblokowana zakładka Pobierz</li>
-                <li><span style="color: var(--cyan);">✓</span> Powiadomienia dźwiękowe i pulpit</li>
+                <li><span style="color: var(--cyan);">✓</span> Odblokowane pobieranie programu</li>
+                <li><span style="color: var(--cyan);">✓</span> Ograniczenie: 1 trial na dane urządzenie (HWID)</li>
             </ul>
             {% if user %}
                 {% if license and license.status == 'active' %}
                     <button class="btn btn-outline" style="width: 100%;" disabled>Posiadasz już aktywny pakiet</button>
                 {% else %}
                     <form method="POST" action="/shop/claim_trial">
-                        <button type="submit" class="btn btn-primary" style="width: 100%;">⚡ Odbierz Darmowy Trial (7 Dni)</button>
+                        <button type="submit" class="btn btn-primary" style="width: 100%;">⚡ Odbierz Darmowy Trial (1 Dzień)</button>
                     </form>
                 {% endif %}
             {% else %}
@@ -1329,28 +1358,48 @@ SHOP_HTML = """
             {% endif %}
         </div>
 
-        <!-- Sniper PRO -->
+        <!-- Sniper Weekly (19 PLN / 7 Dni) -->
+        <div class="pricing-card">
+            <h3 style="font-size: 20px; font-weight: 700;">Sniper Weekly</h3>
+            <div style="font-size: 13px; color: var(--green);">Elastyczny pakiet na tydzień</div>
+            <div class="pricing-price" style="color: var(--green);">19 PLN <span style="font-size: 14px; color: var(--text-muted); font-weight: 500;">/ 7 dni</span></div>
+            <ul class="features-list">
+                <li><span style="color: var(--green);">✓</span> Pełny 7-dniowy nielimitowany dostęp</li>
+                <li><span style="color: var(--green);">✓</span> Natychmiastowe powiadomienia Discord</li>
+                <li><span style="color: var(--green);">✓</span> Dostęp do pobrania paczki instalacyjnej</li>
+                <li><span style="color: var(--green);">✓</span> Wsparcie techniczne i aktualizacje</li>
+            </ul>
+            {% if user %}
+                <form method="POST" action="/shop/buy_weekly">
+                    <button type="submit" class="btn btn-primary" style="width: 100%; background: linear-gradient(135deg, #10b981, #059669);">Wybierz Tydzień (19 PLN)</button>
+                </form>
+            {% else %}
+                <a href="/login" class="btn btn-primary" style="width: 100%; background: linear-gradient(135deg, #10b981, #059669);">Zaloguj się aby Kupić</a>
+            {% endif %}
+        </div>
+
+        <!-- Sniper PRO (49 PLN / 30 Dni) -->
         <div class="pricing-card featured">
             <span class="badge badge-active" style="position: absolute; top: 16px; right: 16px;">Najpopularniejszy</span>
             <h3 style="font-size: 20px; font-weight: 700;">Sniper PRO</h3>
             <div style="font-size: 13px; color: var(--accent);">Dla aktywnych resellerów</div>
             <div class="pricing-price" style="color: var(--accent);">49 PLN <span style="font-size: 14px; color: var(--text-muted); font-weight: 500;">/ 30 dni</span></div>
             <ul class="features-list">
-                <li><span style="color: var(--accent);">✓</span> Wszystko z pakietu Trial</li>
+                <li><span style="color: var(--accent);">✓</span> Wszystko z pakietu tygodniowego</li>
                 <li><span style="color: var(--accent);">✓</span> Nielimitowane Webhooki Discord</li>
                 <li><span style="color: var(--accent);">✓</span> Najwyższy priorytet pętli skanowania (1s)</li>
-                <li><span style="color: var(--accent);">✓</span> Priorytetowe wsparcie techniczne</li>
+                <li><span style="color: var(--accent);">✓</span> Opcja darmowego resetu HWID</li>
             </ul>
             {% if user %}
                 <form method="POST" action="/shop/buy_pro">
-                    <button type="submit" class="btn btn-primary" style="width: 100%;">Kup Pakiet PRO (30 Dni)</button>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Kup Pakiet PRO (49 PLN)</button>
                 </form>
             {% else %}
                 <a href="/login" class="btn btn-primary" style="width: 100%;">Zaloguj się aby Kupić</a>
             {% endif %}
         </div>
 
-        <!-- Lifetime VIP -->
+        <!-- Lifetime VIP (149 PLN) -->
         <div class="pricing-card">
             <h3 style="font-size: 20px; font-weight: 700;">Lifetime VIP</h3>
             <div style="font-size: 13px; color: var(--purple);">Bezterminowy dostęp na stałe</div>
@@ -2283,16 +2332,22 @@ def shop_claim_trial():
 
     conn = get_db()
     try:
+        # Sprawdzamy czy użytkownik nie ma już przypisanego HWID, który zużył trial
+        if lic and lic["hwid"]:
+            cur = conn.execute("SELECT * FROM used_trials WHERE hwid = ?", (lic["hwid"],))
+            if cur.fetchone():
+                return redirect(url_for("shop", msg="Twój komputer (HWID) wykorzystał już darmowy 1-dniowy Trial. Wybierz pakiet płatny od 19 zł."))
+
         now_dt = datetime.now()
         now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-        exp_dt = now_dt + timedelta(days=7)
+        exp_dt = now_dt + timedelta(days=1)
         exp_str = exp_dt.strftime("%Y-%m-%d %H:%M:%S")
         trial_key = generate_license_code("SNIPE-TRIAL")
 
         conn.execute("""
             INSERT INTO licenses (key, note, duration_days, created_at, expires_at, hwid, status)
-            VALUES (?, ?, 7, ?, ?, '', 'active')
-        """, (trial_key, f"Starter Trial: {user['username']}", now_str, exp_str))
+            VALUES (?, ?, 1, ?, ?, '', 'active')
+        """, (trial_key, f"Starter Trial (1 Dzień): {user['username']}", now_str, exp_str))
 
         conn.execute("UPDATE users SET license_key = ? WHERE id = ?", (trial_key, user["id"]))
         conn.commit()
@@ -2301,9 +2356,47 @@ def shop_claim_trial():
     finally:
         conn.close()
 
+@app.route("/shop/buy_weekly", methods=["POST"])
+@login_required
+def shop_buy_weekly():
+    """Pakiet Tygodniowy: 7 dni za 19 PLN."""
+    user, lic = get_current_user_and_license()
+    conn = get_db()
+    try:
+        now_dt = datetime.now()
+        now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        days = 7
+
+        if lic:
+            try:
+                curr_exp = datetime.strptime(lic["expires_at"], "%Y-%m-%d %H:%M:%S")
+                base_dt = max(now_dt, curr_exp)
+            except Exception:
+                base_dt = now_dt
+            new_exp = base_dt + timedelta(days=days)
+            new_exp_str = new_exp.strftime("%Y-%m-%d %H:%M:%S")
+            new_duration = (lic["duration_days"] or 0) + days
+            conn.execute("UPDATE licenses SET expires_at = ?, duration_days = ?, status = 'active' WHERE key = ?",
+                         (new_exp_str, new_duration, lic["key"]))
+        else:
+            week_key = generate_license_code("SNIPE-WEEK")
+            exp_str = (now_dt + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute("""
+                INSERT INTO licenses (key, note, duration_days, created_at, expires_at, hwid, status)
+                VALUES (?, ?, ?, ?, ?, '', 'active')
+            """, (week_key, f"Weekly 7 Dni (19 PLN): {user['username']}", days, now_str, exp_str))
+            conn.execute("UPDATE users SET license_key = ? WHERE id = ?", (week_key, user["id"]))
+
+        conn.commit()
+        return redirect(url_for("download"))
+    finally:
+        conn.close()
+
+@app.route("/shop/buy_monthly", methods=["POST"])
 @app.route("/shop/buy_pro", methods=["POST"])
 @login_required
 def shop_buy_pro():
+    """Pakiet Miesięczny: 30 dni za 49 PLN."""
     user, lic = get_current_user_and_license()
     conn = get_db()
     try:
@@ -2319,7 +2412,7 @@ def shop_buy_pro():
                 base_dt = now_dt
             new_exp = base_dt + timedelta(days=days)
             new_exp_str = new_exp.strftime("%Y-%m-%d %H:%M:%S")
-            new_duration = lic["duration_days"] + days
+            new_duration = (lic["duration_days"] or 0) + days
             conn.execute("UPDATE licenses SET expires_at = ?, duration_days = ?, status = 'active' WHERE key = ?",
                          (new_exp_str, new_duration, lic["key"]))
         else:
@@ -2328,7 +2421,7 @@ def shop_buy_pro():
             conn.execute("""
                 INSERT INTO licenses (key, note, duration_days, created_at, expires_at, hwid, status)
                 VALUES (?, ?, ?, ?, ?, '', 'active')
-            """, (pro_key, f"PRO 30 Dni: {user['username']}", days, now_str, exp_str))
+            """, (pro_key, f"PRO 30 Dni (49 PLN): {user['username']}", days, now_str, exp_str))
             conn.execute("UPDATE users SET license_key = ? WHERE id = ?", (pro_key, user["id"]))
 
         conn.commit()
@@ -2517,13 +2610,13 @@ def auth_google_select():
             now_dt = datetime.now()
             now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
             trial_key = generate_license_code("SNIPE-TRIAL")
-            exp_dt = now_dt + timedelta(days=7)
+            exp_dt = now_dt + timedelta(days=1)
             exp_str = exp_dt.strftime("%Y-%m-%d %H:%M:%S")
 
             conn.execute("""
                 INSERT INTO licenses (key, note, duration_days, created_at, expires_at, hwid, status)
-                VALUES (?, ?, 7, ?, ?, '', 'active')
-            """, (trial_key, f"Google: {name} ({email})", now_str, exp_str))
+                VALUES (?, ?, 1, ?, ?, '', 'active')
+            """, (trial_key, f"Google Trial (1 Dzień): {name} ({email})", now_str, exp_str))
 
             dummy_hash = hashlib.sha256(secrets.token_hex(16).encode()).hexdigest()
             cur = conn.execute("""
@@ -2618,15 +2711,15 @@ def register():
                 now_dt = datetime.now()
                 now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-                # Generowanie 7-dniowego klucza Starter Trial
+                # Generowanie 1-dniowego klucza Starter Trial (max 1 na HWID)
                 trial_key = generate_license_code("SNIPE-TRIAL")
-                exp_dt = now_dt + timedelta(days=7)
+                exp_dt = now_dt + timedelta(days=1)
                 exp_str = exp_dt.strftime("%Y-%m-%d %H:%M:%S")
 
                 conn.execute("""
                     INSERT INTO licenses (key, note, duration_days, created_at, expires_at, hwid, status)
-                    VALUES (?, ?, 7, ?, ?, '', 'active')
-                """, (trial_key, f"Konto: {uname} ({email})", now_str, exp_str))
+                    VALUES (?, ?, 1, ?, ?, '', 'active')
+                """, (trial_key, f"Starter Trial (1 Dzień): {uname} ({email})", now_str, exp_str))
 
                 conn.execute("""
                     INSERT INTO users (username, email, password_hash, role, is_verified, verification_code, verification_token, license_key, created_at)
